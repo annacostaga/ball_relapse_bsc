@@ -1,0 +1,393 @@
+---
+title: "Annotate lichi-c regions with chromHMM data"
+author: "Anna"
+date: "2024-06-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+
+
+```{r}
+library(igraph)
+library(HiCaptuRe)
+library(dplyr)
+library(readr)
+library(stringr)
+library(RColorBrewer)
+library(tidyr)
+```
+
+```{r}
+# Load interacrions
+inter <- load_interactions("/home/acost1/BALL_project/data/lichic/lichic_peakmatrix_B_cell_roadmap.txt")
+
+# Load annotations
+inter_annotated <- annotate_interactions(interactions = inter,
+                                         annotation = "/home/acost1/BALL_project/data/lichic/annotation_example.txt")
+```
+
+
+
+
+# Annotate lichic regions with chromatin states obtained from ChromHMM 
+
+```{r}
+# Data.frame format
+inter <- load_interactions(file)
+inter_annotated <- annotate_interactions(inter, annotation = "/home/acost1/BALL_project/data/lichic/annotation_example.txt")
+
+
+inter_annotated <- as.data.frame(inter_annotated)
+
+file <- "/home/acost1/BALL_project/data/lichic/lichic_peakmatrix_B_cell_roadmap.txt"
+data <- data.table::fread(file = file, header = T, stringsAsFactors = F, na.strings = "")
+
+pos_inter <- grep("^CS_", colnames(inter_annotated))
+colnames(inter_annotated)[pos_inter] <- paste0("CS_", colnames(data)[12:ncol(data)] )
+
+
+inter_annotated_df <- as.data.frame(inter_annotated)
+inter_annotated_df$id <- 1:nrow(inter_annotated_df)
+
+rm(list = setdiff(ls(), "inter_annotated_df"))
+  
+# 1. Only interactions that are significative
+counter <- 0
+yes_interactions <- dplyr::select(inter_annotated_df, CS_HSC, CS_PreProB, CS_ProB, CS_PreB, CS_immtransB, CS_nB1Mnew, CS_GCB, CS_memB, CS_PC) %>%
+    apply(1, function(x) {
+      counter <<- counter + 1
+      if(sum(x >= 5) >= 1) counter }
+    ) %>% unlist() %>% as.numeric()
+  inter_annotated_df <- inter_annotated_df[yes_interactions, ]  # n = 47.3335 (only removed 1 interaction)
+
+  
+
+# 2. Num. interactions
+inter_annotated_df$num_interaction <- 1:nrow(inter_annotated_df)
+print("print num interactions!")
+  
+
+
+# 3. Chicago score from wide to long
+inter_annotated_df <- inter_annotated_df %>%
+    pivot_longer(
+      cols = starts_with("CS_"),
+      names_to = "cell_type",
+      names_prefix = "CS_",
+      values_to = "chicago_score",
+      values_drop_na = TRUE
+    ) # n = 6.153.355 --> 6.390.345
+  
+  
+# remove interactions non-significative and control cell types
+inter_annotated_df <- filter(inter_annotated_df, chicago_score >= 5 & !cell_type %in% c("CMP", "Mon", "nCD4", "nCD8")) # 1.093.692 interactions, 19.008 genes --> 1.303.771
+print("chicago score long!")
+  
+ 
+
+# 4. Load ChromHMM files
+  hsc_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/HSC05_15_dense_fin.bed",  col_names = FALSE,
+                                col_types = cols(X1 = col_character()))
+  hsc_chromhmm <- hsc_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "HSC")
+  
+  prepro_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/PreProB05_15_dense_fin.bed",  col_names = FALSE,
+                                col_types = cols(X1 = col_character()))
+  prepro_chromhmm <- prepro_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "PreProB")
+  
+  pro_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/ProB05_15_dense_fin.bed",  col_names = FALSE,
+                             col_types = cols(X1 = col_character()))
+  pro_chromhmm <- pro_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "ProB")
+  
+  pre_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/PreB05_15_dense_fin.bed",  col_names = FALSE,
+                             col_types = cols(X1 = col_character()))
+  pre_chromhmm <- pre_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "PreB")
+  
+  trans_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/immtransB05_15_dense_fin.bed",  col_names = FALSE,
+                               col_types = cols(X1 = col_character()))
+  trans_chromhmm <- trans_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "immtransB")
+  
+  nb_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/nB05_15_dense_fin.bed",  col_names = FALSE,
+                            col_types = cols(X1 = col_character()))
+  nb_chromhmm <- nb_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "nB1Mnew")
+  
+  gcb_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/GCB05_15_dense_fin.bed",  col_names = FALSE,
+                             col_types = cols(X1 = col_character()))
+  gcb_chromhmm <- gcb_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "GCB")
+  
+  memb_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/memB05_15_dense_fin.bed",  col_names = FALSE,
+                              col_types = cols(X1 = col_character()))
+  memb_chromhmm <- memb_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "memB")
+  
+  pc_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/PC05_15_dense_fin.bed",  col_names = FALSE,
+                            col_types = cols(X1 = col_character()))
+  pc_chromhmm <- pc_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "PC")
+  
+  chromhmm <- rbind(hsc_chromhmm, prepro_chromhmm, pro_chromhmm, pre_chromhmm, trans_chromhmm,
+                    nb_chromhmm, gcb_chromhmm, memb_chromhmm, pc_chromhmm)
+  
+  rm(hsc_chromhmm, prepro_chromhmm, pro_chromhmm, pre_chromhmm, trans_chromhmm,
+     nb_chromhmm, gcb_chromhmm, memb_chromhmm, pc_chromhmm)
+  print("load chromhmm files!")
+  
+
+# 5. select chromhmm categories within the other end/bait of the interactions
+  interaction_region <- inter_annotated_df %>% dplyr::select(seqnames2, start2, end2, cell_type) %>%
+    filter(!duplicated(.)) %>% #  709.073
+    dplyr::rename(chr = seqnames2,
+           start = start2, 
+           end = end2)
+
+chromhmm <-  filter(chromhmm, category != "None")
+chromm_names <- names(table(chromhmm$category)) 
+
+chromhmm_interaction <- function(cell_type_B, chromosome){
+
+  
+  chromhmm <- filter(chromhmm, cell_type == cell_type_B & chr == chromosome)
+ apply(data.frame(interaction_region) %>% filter(chr == chromosome & cell_type == cell_type_B), 1, function(x) {
+    aux1 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start == as.numeric(x["start"]) & chromhmm$start == as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # same interacting region
+    aux2 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start > as.numeric(x["start"]) & chromhmm$start < as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # start position of chromhmm between the start and end position of the interacting region
+    aux3 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$end > as.numeric(x["start"]) & chromhmm$end < as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # # end position of chromhmm between the start and end position of the interacting region
+    aux4 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start > as.numeric(x["start"]) & chromhmm$end < as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # chromhmm within the interacting region
+    aux5 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start < as.numeric(x["start"]) & chromhmm$end > as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # start of chromhmm before the start, end of chromhmm after the end of the interacting region
+    
+    aux <- rbind(aux1, aux2, aux3, aux4, aux5) %>% filter(!duplicated(.))
+    
+    aux$start[aux$start < as.numeric(x["start"])] <- as.numeric(x["start"])
+    aux$end[aux$end > as.numeric(x["end"]) ] <-  as.numeric(x["end"])
+    
+    aux$category <- factor(aux$category, levels = chromm_names,
+                                         labels = chromm_names)
+    
+    data.frame(chr = as.character(x["chr"]) , start = as.numeric(x["start"]) , end = as.numeric(x["end"]) ,
+               cell_type = as.character(x["cell_type"]) ,
+               as.matrix(table(aux$category)) %>% t() )
+  } ) %>% bind_rows()
+  
+}
+
+
+# All interactions for each cell type  
+chromhmm_interaction_all <- apply(data.frame(names(table(chromhmm$chr))), 1, function(x){
+  
+   chromhmm_interaction_HSC <- chromhmm_interaction("HSC", x)
+    print(paste(x, "HSC \n "))
+    
+    chromhmm_interaction_PreProB <- chromhmm_interaction("PreProB", x)
+    print(paste(x, "PreProB \n "))
+    chromhmm_interaction_ProB <- chromhmm_interaction("ProB", x)
+    print(paste(x, "ProB \n "))
+    
+    chromhmm_interaction_PreB <- chromhmm_interaction("PreB", x)
+     print(paste(x, "PreB \n "))
+    chromhmm_interaction_transB <- chromhmm_interaction("immtransB", x)
+     print(paste(x, "transB \n "))
+    chromhmm_interaction_nB <- chromhmm_interaction("nB1Mnew", x)
+     print(paste(x, "nB \n "))
+    chromhmm_interaction_GCB <- chromhmm_interaction("GCB", x)
+     print(paste(x, "GCB \n "))
+    chromhmm_interaction_memB <- chromhmm_interaction("memB", x)
+     print(paste(x, "memB \n "))
+    chromhmm_interaction_PC <- chromhmm_interaction("PC", x)
+     print(paste(x, "PC \n "))
+     
+    chromhmm_interaction <- rbind(chromhmm_interaction_HSC, chromhmm_interaction_PreProB, chromhmm_interaction_ProB,
+          chromhmm_interaction_PreB, chromhmm_interaction_transB,
+          chromhmm_interaction_nB, chromhmm_interaction_GCB,
+          chromhmm_interaction_memB, chromhmm_interaction_PC)
+    return(chromhmm_interaction)
+    
+  
+}) %>% bind_rows()
+  print("chromhmm into interactions!")
+  
+# 6. put chromHmm categories inside data.frame with Chicago score
+inter_annotated_gene <- merge(inter_annotated_df, chromhmm_interaction_all, 
+                                by.x= c("cell_type", "seqnames2", "start2", "end2" ), 
+                                by.y = c("cell_type", "chr", "start", "end" ),
+                                all.x = TRUE)
+  
+
+```
+
+```{r}
+inter_annotated_gene$cell_type <- factor(inter_annotated_gene$cell_type,
+                                         levels = c("HSC", "PreProB", "ProB", "PreB", 
+                                                    "immtransB", "nB1Mnew", "GCB",
+                                                    "memB", "PC"),
+                                         labels = c("HSC", "PreProB", "ProB", "PreB", 
+                                                    "immtransB", "nB1Mnew", "GCB",
+                                                    "memB", "PC"))
+cell_types <- levels(inter_annotated_gene$cell_type)
+
+input_list <- apply(data.frame(cell_types), 1, function(x) inter_annotated_gene$id[inter_annotated_gene$cell_type == x])
+names(input_list) <- cell_types
+
+
+# - Number of interactions between genes up,down,constant with number of enhancers, silencers, etc
+
+inter_annotated_gene$EA_c <- ifelse(inter_annotated_gene$EA == 0,  0, 1)
+inter_annotated_gene$EPo_c <- ifelse(inter_annotated_gene$EPo == 0,  0, 1)
+inter_annotated_gene$EPr_c <- ifelse(inter_annotated_gene$EPr == 0, 0, 1)
+inter_annotated_gene$Het_c  <- ifelse(inter_annotated_gene$Het == 0, 0, 1)
+inter_annotated_gene$K27ac_c  <- ifelse(inter_annotated_gene$K27ac == 0,  0, 1)
+inter_annotated_gene$K9me3K27me3_c <- ifelse(inter_annotated_gene$K9me3K27me3 == 0,  0, 1)
+inter_annotated_gene$K9me3K4me1_c <- ifelse(inter_annotated_gene$K9me3K4me1 == 0,  0, 1)
+inter_annotated_gene$PA_c <- ifelse(inter_annotated_gene$PA == 0,  0, 1)
+inter_annotated_gene$PPo_c <- ifelse(inter_annotated_gene$PPo == 0,  0, 1)
+inter_annotated_gene$PPo2_c <- ifelse(inter_annotated_gene$PPo2 == 0,  0, 1)
+inter_annotated_gene$Sil_c <- ifelse(inter_annotated_gene$Sil == 0,  0, 1)
+inter_annotated_gene$TssFlnk_c <- ifelse(inter_annotated_gene$TssFlnk == 0,  0, 1)
+inter_annotated_gene$TssFlnkD_c <- ifelse(inter_annotated_gene$TssFlnkD == 0,  0, 1)
+inter_annotated_gene$TssFlnkU_c  <- ifelse(inter_annotated_gene$TssFlnkU == 0,  0, 1)
+```
+
+
+
+```{r}
+save(inter_annotated_gene, file = "/home/acost1/BALL_project/results/lichi_chromhmm/inter_annotated_gene_updated.rds")
+```
+
+
+
+## Other metrics
+
+```{r}
+upset_plot <- UpSetR::upset(UpSetR::fromList(input_list), sets = cell_types[8:1], keep.order = T,  order.by = "freq", nintersects = 30)
+
+uu_c <- cowplot::plot_grid(upset_plot$Main_bar, upset_plot$Matrix,
+                            nrow=2, align='hv', rel_heights = c(3,1),
+                           rel_widths = c(2,3))
+
+
+num_inter <-  inter_annotated_gene %>% group_by(cell_type) %>%
+   summarise(n_interactions = length(unique(num_interaction)))
+ 
+num_genes <- inter_annotated_gene %>% group_by(cell_type) %>%
+   summarise(n_genes = length(unique(B.id1)))
+ 
+num_inter_gene <- inter_annotated_gene %>% group_by(cell_type, B.id1) %>%
+   filter(B.id1 != "non-annotated") %>%
+   summarise(n_inter= length(unique(num_interaction))) %>%
+   group_by(cell_type) %>%
+   summarise(median = median(n_inter), quantile1= quantile(n_inter, 0.25), quantile3 = quantile(n_inter, 0.75))
+ 
+ metrics_aux <- inter_annotated_gene %>%
+   group_by(cell_type, B.id1) %>%
+   summarise(n_inter= length(unique(num_interaction))) %>%
+   filter(!is.na(B.id1))
+ 
+ p_value <- kruskal.test(metrics_aux$cell_type ~ metrics_aux$n_inter)$p.value %>% sprintf("%.3f", .)
+ 
+ 
+ table_metrics <- rbind(c(num_inter$n_interactions, ""),
+       c(num_genes$n_genes, ""),
+       c(paste0(num_inter_gene$median, " [", num_inter_gene$quantile1, " - ", num_inter_gene$quantile3, "]") , p_value))
+ 
+ rownames(table_metrics) <- c("Num interactions", "Num genes", "Num interactions/gene")
+ 
+ 
+ 
+ metrics <- filter(inter_annotated_gene, cell_type != "HSC") %>%
+   group_by(cell_type) %>%
+      summarise(EA = sum(EA_c)/n() * 100,
+                EPo = sum(EPo_c)/n() * 100,
+                EPr = sum(EPr_c)/n() * 100,
+                Het = sum(Het_c)/n() * 100,
+                K27ac = sum(K27ac_c)/n() * 100,
+                K9me3K27me3 = sum(K9me3K27me3_c)/n() * 100,
+                K9me3K4me1= sum(K9me3K4me1_c)/n() * 100,
+                PA = sum(PA_c)/n() * 100,
+                PPo = sum(PPo_c)/n() * 100,
+                Sil = sum(Sil_c)/n() * 100,
+                TssFlnk = sum(TssFlnk_c)/n() * 100,
+                TssFlnkD = sum(TssFlnkD_c)/n() * 100,
+                TssFlnkU = sum(TssFlnkU_c)/n() * 100) %>%
+      tidyr::pivot_longer(!cell_type, names_to = "category", values_to = "perc")
+ 
+ 
+  metrics_n <- filter(inter_annotated_gene, cell_type != "HSC")
+  levels(metrics_n$cell_type)[levels(metrics_n$cell_type) == 'HSC'] <- NA
+  p_EA <- chisq.test(table(metrics_n$cell_type, metrics_n$EA_c))$p.value %>% sprintf("%.3f", .)
+    p_EPo <- chisq.test(table(metrics_n$cell_type, metrics_n$EPo_c))$p.value %>% sprintf("%.3f", .)
+    p_EPr <- chisq.test(table(metrics_n$cell_type, metrics_n$EPr_c))$p.value %>% sprintf("%.3f", .)
+    p_Het <- chisq.test(table(metrics_n$cell_type, metrics_n$Het_c))$p.value %>% sprintf("%.3f", .)
+   p_K27ac <- chisq.test(table(metrics_n$cell_type, metrics_n$K27ac_c))$p.value %>% sprintf("%.3f", .)
+    p_K9me3K27me3 <- chisq.test(table(metrics_n$cell_type, metrics_n$K9me3K27me3_c))$p.value %>% sprintf("%.3f", .)
+    p_K9me3K4me1 <- chisq.test(table(metrics_n$cell_type, metrics_n$K9me3K4me1_c))$p.value %>% sprintf("%.3f", .)
+    p_PA <- chisq.test(table(metrics_n$cell_type, metrics_n$PA_c))$p.value %>% sprintf("%.3f", .)
+    p_PPo <- chisq.test(table(metrics_n$cell_type, metrics_n$PPo_c))$p.value %>% sprintf("%.3f", .)
+    p_PPo2 <- chisq.test(table(metrics_n$cell_type, metrics_n$PPo2_c))$p.value %>% sprintf("%.3f", .)
+    p_Sil <- chisq.test(table(metrics_n$cell_type, metrics_n$Sil_c))$p.value %>% sprintf("%.3f", .)
+    p_TssFlnk <- chisq.test(table(metrics_n$cell_type, metrics_n$TssFlnk_c))$p.value %>% sprintf("%.3f", .)
+    p_TssFlnkD <- chisq.test(table(metrics_n$cell_type, metrics_n$TssFlnkD_c))$p.value %>% sprintf("%.3f", .)
+    p_TssFlnkU <- chisq.test(table(metrics_n$cell_type, metrics_n$TssFlnkU_c))$p.value %>% sprintf("%.3f", .)
+   
+   
+    barplot <- ggplot(metrics, aes(fill=cell_type, y=perc, x=cell_type)) +
+      facet_wrap(~category,
+                 labeller = as_labeller(c(
+                   EA = paste("EA p-value =", p_EA),
+                   EPo = paste("EPo p-value =", p_EPo),
+                   EPr = paste("EPr p-value =", p_EPr),
+                   Het = paste("Het p-value =", p_Het),
+                   K27ac = paste("K27ac p-value =", p_K27ac),
+                   K9me3K27me3 = paste("K9me3K27me3 p-value =", p_K9me3K27me3),
+                   K9me3K4me1 = paste("K9me3K4me1 p-value =", p_K9me3K4me1),        
+                   PA = paste("PA p-value =", p_PA),        
+                   PPo  = paste("PPo p-value =", p_PPo),      
+                   Sil  = paste("Sil p-value =", p_Sil),  
+                   TssFlnk = paste("TssFlnk p-value =", p_TssFlnk),
+                   TssFlnkD = paste("TssFlnkD p-value =", p_TssFlnkD),
+                   TssFlnkU = paste("TssFlnkU p-value =", p_TssFlnkU)
+                 ))) +
+        geom_bar(position="dodge", stat="identity") +
+        geom_text(aes(label = scales::percent(round(perc/100,3))), vjust = -0.2, size = 3) +
+        theme(legend.position = "none") +
+        xlab("") + ylab("% interactions")
+   
+
+ mytheme <- gridExtra::ttheme_default(
+    core = list(fg_params=list(cex = 1)),
+    colhead = list(fg_params=list(cex = 1)),
+    rowhead = list(fg_params=list(cex = 1)))
+ 
+
+gridExtra::grid.arrange(uu_c, barplot, gridExtra::tableGrob(table_metrics, cols = c(cell_types, "p-value"), theme = mytheme), ncol = 2, layout_matrix = rbind(c(1,2), c(3,2)))
+ 
+ gridExtra::grid.arrange(uu_c, barplot, tableGrob(table_metrics, cols = c("Constant", "Up", "Down", "p-value")), ncol = 2,
+                            layout_matrix = rbind(c(1,2), c(3,2)))
+```
+

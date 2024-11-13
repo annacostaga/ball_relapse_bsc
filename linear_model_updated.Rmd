@@ -24,11 +24,11 @@ library(ie2misc)
 # Load data
 ```{r}
 load("/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit.rds")
+load("/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit_updated.rds")
 ```
 
 
 ```{r}
-
 load("/home/acost1/BALL_project/results/gnn/chromhmm_interaction_all.rds")
 
 oe_classification <- chromhmm_interaction_all %>% select(id, cell_type, category) %>%

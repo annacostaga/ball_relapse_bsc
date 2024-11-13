@@ -1,0 +1,1148 @@
+---
+title: "Predict gene expression"
+author: "Anna"
+date: "2024-07-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+```{r}
+# Packages
+library(dplyr)
+library(readr)
+library(stringr)
+library(tidyr)
+library(jtools)
+library(ie2misc)
+```
+
+
+# Load data
+```{r}
+load("/home/acost1/BALL_project/results/lichi_chromhmm/figures_biola/inter_annotated_gene_def.rds")
+```
+
+# Summary of the data
+
+```{r eval=FALSE, include=FALSE}
+# Add chromhmm state to the baits
+
+# 1.  Load ChromHMM files
+  hsc_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/HSC05_15_dense_fin.bed",  col_names = FALSE,
+                                col_types = cols(X1 = col_character()))
+  hsc_chromhmm <- hsc_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "HSC")
+  
+  prepro_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/PreProB05_15_dense_fin.bed",  col_names = FALSE,
+                                col_types = cols(X1 = col_character()))
+  prepro_chromhmm <- prepro_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "PreProB")
+  
+  pro_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/ProB05_15_dense_fin.bed",  col_names = FALSE,
+                             col_types = cols(X1 = col_character()))
+  pro_chromhmm <- pro_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "ProB")
+  
+  pre_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/PreB05_15_dense_fin.bed",  col_names = FALSE,
+                             col_types = cols(X1 = col_character()))
+  pre_chromhmm <- pre_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "PreB")
+  
+  trans_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/immtransB05_15_dense_fin.bed",  col_names = FALSE,
+                               col_types = cols(X1 = col_character()))
+  trans_chromhmm <- trans_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "immtransB")
+  
+  nb_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/nB05_15_dense_fin.bed",  col_names = FALSE,
+                            col_types = cols(X1 = col_character()))
+  nb_chromhmm <- nb_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "nB1Mnew")
+  
+  gcb_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/GCB05_15_dense_fin.bed",  col_names = FALSE,
+                             col_types = cols(X1 = col_character()))
+  gcb_chromhmm <- gcb_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "GCB")
+  
+  memb_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/memB05_15_dense_fin.bed",  col_names = FALSE,
+                              col_types = cols(X1 = col_character()))
+  memb_chromhmm <- memb_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "memB")
+  
+  pc_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/PC05_15_dense_fin.bed",  col_names = FALSE,
+                            col_types = cols(X1 = col_character()))
+  pc_chromhmm <- pc_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "PC")
+  
+  chromhmm <- rbind(hsc_chromhmm, prepro_chromhmm, pro_chromhmm, pre_chromhmm, trans_chromhmm,
+                    nb_chromhmm, gcb_chromhmm, memb_chromhmm, pc_chromhmm)
+  
+  rm(hsc_chromhmm, prepro_chromhmm, pro_chromhmm, pre_chromhmm, trans_chromhmm,
+     nb_chromhmm, gcb_chromhmm, memb_chromhmm, pc_chromhmm)
+  print("load chromhmm files!")
+  
+  
+  
+  
+# 2. select chromhmm categories within the other end/bait of the interactions
+interaction_region <- inter_annotated_gene %>% dplyr::select(seqnames1, start1, end1, cell_type) %>%
+    filter(!duplicated(.)) %>% #  n = 139,186 
+    dplyr::rename(chr = seqnames1,
+           start = start1, 
+           end = end1)
+
+chromhmm <-  filter(chromhmm, category %in% c("PA", "PPo", "PPo2", "Het")) 
+chromm_names <- names(table(chromhmm$category)) 
+# PA, PPo, PPo2, Het
+
+
+
+chromhmm_interaction <- function(cell_type_B, chromosome){
+
+  
+  chromhmm <- filter(chromhmm, cell_type == cell_type_B & chr == chromosome)
+ apply(data.frame(interaction_region) %>% filter(chr == chromosome & cell_type == cell_type_B), 1, function(x) {
+    aux1 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start == as.numeric(x["start"]) & chromhmm$start == as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # same interacting region
+    aux2 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start > as.numeric(x["start"]) & chromhmm$start < as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # start position of chromhmm between the start and end position of the interacting region
+    aux3 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$end > as.numeric(x["start"]) & chromhmm$end < as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # # end position of chromhmm between the start and end position of the interacting region
+    aux4 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start > as.numeric(x["start"]) & chromhmm$end < as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # chromhmm within the interacting region
+    aux5 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start < as.numeric(x["start"]) & chromhmm$end > as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # start of chromhmm before the start, end of chromhmm after the end of the interacting region
+    
+    aux <- rbind(aux1, aux2, aux3, aux4, aux5) %>% filter(!duplicated(.))
+    
+    aux$start[aux$start < as.numeric(x["start"])] <- as.numeric(x["start"])
+    aux$end[aux$end > as.numeric(x["end"]) ] <-  as.numeric(x["end"])
+    
+    aux$category <- factor(aux$category, levels = chromm_names,
+                                         labels = chromm_names)
+    
+    data.frame(chr = as.character(x["chr"]) , start = as.numeric(x["start"]) , end = as.numeric(x["end"]) ,
+               cell_type = as.character(x["cell_type"]) ,
+               as.matrix(table(aux$category)) %>% t() )
+  } ) %>% bind_rows()
+  
+}
+
+
+chromhmm_interaction_all <- apply(data.frame(names(table(chromhmm$chr))), 1, function(x){
+  
+  
+    chromhmm_interaction_HSC <- chromhmm_interaction("HSC", x)
+    print(paste(x, "HSC \n "))
+    chromhmm_interaction_PreProB <- chromhmm_interaction("PreProB", x)
+    print(paste(x, "PreProB \n "))
+    chromhmm_interaction_ProB <- chromhmm_interaction("ProB", x)
+    print(paste(x, "ProB \n "))
+    chromhmm_interaction_PreB <- chromhmm_interaction("PreB", x)
+     print(paste(x, "PreB \n "))
+    chromhmm_interaction_transB <- chromhmm_interaction("immtransB", x)
+     print(paste(x, "transB \n "))
+    chromhmm_interaction_nB <- chromhmm_interaction("nB1Mnew", x)
+     print(paste(x, "nB \n "))
+    chromhmm_interaction_GCB <- chromhmm_interaction("GCB", x)
+     print(paste(x, "GCB \n "))
+    chromhmm_interaction_memB <- chromhmm_interaction("memB", x)
+     print(paste(x, "memB \n "))
+    chromhmm_interaction_PC <- chromhmm_interaction("PC", x)
+     print(paste(x, "PC \n "))
+     
+    chromhmm_interaction <- rbind(chromhmm_interaction_HSC, 
+                                  chromhmm_interaction_PreProB, chromhmm_interaction_ProB,
+          chromhmm_interaction_PreB, chromhmm_interaction_transB,
+          chromhmm_interaction_nB, chromhmm_interaction_GCB,
+          chromhmm_interaction_memB, chromhmm_interaction_PC)
+    return(chromhmm_interaction)
+    
+  
+}) %>% bind_rows()
+
+
+
+chromhmm_interaction <- chromhmm_interaction_all 
+
+save(chromhmm_interaction, file = "/home/acost1/BALL_project/results/predict_expression/chrominteraction_promoter_def.rds")
+```
+
+
+
+```{r}
+load("/home/acost1/BALL_project/results/predict_expression/chrominteraction_promoter_def.rds")
+
+chromhmm_interaction$promoter_state <- NA
+chromhmm_interaction$promoter_state[chromhmm_interaction$PA != 0 & chromhmm_interaction$PPo == 0 
+                                    & chromhmm_interaction$PPo2 == 0 & chromhmm_interaction$Het == 0] <- "PA"
+
+chromhmm_interaction$promoter_state[chromhmm_interaction$PA != 0 & chromhmm_interaction$PPo != 0 
+                                    & chromhmm_interaction$PPo2 == 0 & chromhmm_interaction$Het == 0] <- "PA"
+
+
+chromhmm_interaction$promoter_state[chromhmm_interaction$PA != 0 & chromhmm_interaction$PPo != 0 
+                                    & chromhmm_interaction$PPo2 != 0 & chromhmm_interaction$Het == 0] <- "PA"
+
+chromhmm_interaction$promoter_state[chromhmm_interaction$PA != 0 & chromhmm_interaction$PPo != 0 
+                                    & chromhmm_interaction$PPo2 != 0 & chromhmm_interaction$Het != 0] <- "PA"
+
+chromhmm_interaction$promoter_state[chromhmm_interaction$PA == 0 & chromhmm_interaction$PPo != 0 
+                                    & chromhmm_interaction$PPo2 == 0 & chromhmm_interaction$Het == 0] <- "PPo"
+
+chromhmm_interaction$promoter_state[chromhmm_interaction$PA == 0 & chromhmm_interaction$PPo != 0 
+                                    & chromhmm_interaction$PPo2 != 0 & chromhmm_interaction$Het == 0] <- "PPo"
+
+chromhmm_interaction$promoter_state[chromhmm_interaction$PA == 0 & chromhmm_interaction$PPo != 0 
+                                    & chromhmm_interaction$PPo2 != 0 & chromhmm_interaction$Het != 0] <- "PPo_Het"
+
+chromhmm_interaction$promoter_state[chromhmm_interaction$PA == 0 & chromhmm_interaction$PPo == 0 
+                                    & chromhmm_interaction$PPo2 != 0 & chromhmm_interaction$Het == 0] <- "PPo"
+
+chromhmm_interaction$promoter_state[chromhmm_interaction$PA == 0 & chromhmm_interaction$PPo == 0 
+                                    & chromhmm_interaction$PPo2 != 0 & chromhmm_interaction$Het != 0] <- "PPo_Het"
+
+chromhmm_interaction$promoter_state[chromhmm_interaction$PA == 0 & chromhmm_interaction$PPo == 0 
+                                    & chromhmm_interaction$PPo2 == 0 & chromhmm_interaction$Het != 0] <- "Het"
+
+chromhmm_interaction$promoter_state[chromhmm_interaction$PA == 0 & chromhmm_interaction$PPo == 0 
+                                    & chromhmm_interaction$PPo2 == 0 & chromhmm_interaction$Het == 0] <- "none"
+
+
+table(chromhmm_interaction$promoter_state)
+
+inter_annotated_gene <- merge(inter_annotated_gene, 
+      dplyr::rename(chromhmm_interaction, seqnames1= chr, start1 = start, end1 = end ),
+      by = c("seqnames1", "start1", "end1", "cell_type"), 
+      all.x = TRUE)
+
+
+rm(chromhmm_interaction)
+```
+
+
+
+
+
+
+```{r}
+inter_annotated_gene <- dplyr::select(inter_annotated_gene, B.id1, cell_type, seqnames1, 
+                               start1, end1, promoter_state, EA, EPr, EPo, Sil,
+                               chicago_score) %>%
+                        filter(B.id1 != "non-annotated")
+```
+
+
+
+
+
+```{r}
+inter_annotated_gene <- apply(data.frame(inter_annotated_gene), 1, function(x){
+    n <- length(str_split_1(x[["B.id1"]], ","))
+    
+    data.frame(B.id1 = str_split_1(x[["B.id1"]], ","), 
+               cell_type = rep(x[["cell_type"]], n), 
+               seqnames1 = rep(x[["seqnames1"]], n), 
+               start1 = rep(x[["start1"]], n),
+               end1 = rep(x[["end1"]], n),
+               promoter_state = rep(x[["promoter_state"]], n ),
+               
+               EA =  rep(x[["EA"]], n),
+               EPr = rep(x[["EPr"]], n),
+               EPo = rep(x[["EPo"]], n),
+               Sil = rep(x[["Sil"]], n),
+              
+               chicago_score = rep(x[["chicago_score"]], n) ) } ) %>% bind_rows()
+```
+
+
+
+
+```{r}
+load("/home/acost1/BALL_project/results/predict_expression/inter_annotated_gene_processed.rds")
+
+inter_annotated_sum <- inter_annotated_gene %>% group_by(B.id1, cell_type, seqnames1) %>%
+  mutate(EA = as.numeric(EA),
+         EPr = as.numeric(EPr),
+         EPo = as.numeric(EPo), 
+         Sil = as.numeric(Sil),
+         chicago_score = as.numeric(chicago_score)
+         )  %>%
+  mutate(chicago_score_p = chicago_score / max(chicago_score)) %>%
+  summarise(n_EA = sum(EA),
+            n_EPr = sum(EPr), 
+            n_EPo = sum(EPo),
+            n_Sil = sum(Sil),
+            
+            EA_chicago = sum(EA * chicago_score) / sum(chicago_score),
+            EPr_chicago = sum(EPr * chicago_score) / sum(chicago_score),
+            EPo_chicago = sum(EPo * chicago_score) / sum(chicago_score),
+            Sil_chicago = sum(Sil * chicago_score) / sum(chicago_score),
+            
+            EA_chicago_p = sum(EA * chicago_score_p) / sum(chicago_score_p),
+            EPr_chicago_p = sum(EPr * chicago_score_p) / sum(chicago_score_p),
+            EPo_chicago_p = sum(EPo * chicago_score_p) / sum(chicago_score_p),
+            Sil_chicago_p = sum(Sil * chicago_score_p) / sum(chicago_score_p),
+            
+            promoter_state = paste0(promoter_state, collapse = "-"))
+
+
+
+
+# Genes in multiple chromosomes
+genes_rm <- inter_annotated_sum %>% group_by(B.id1, cell_type)  %>%
+  summarise(n = n()) %>%
+  filter(n > 1) %>% dplyr::select(B.id1) %>% unique() # n = 21
+
+inter_annotated_sum <- filter(inter_annotated_sum, !B.id1 %in% genes_rm$B.id1)
+```
+
+
+
+
+```{r}
+# Assess if they are duplicates (NO)
+
+  # Genes for each cell type
+table(inter_annotated_sum$cell_type)
+tapply(inter_annotated_sum$B.id1,inter_annotated_sum$cell_type , function(x) length(unique(x)))
+
+#    GCB       HSC immtransB      memB   nB1Mnew        PC      PreB   PreProB      ProB 
+#    20817     21958     20831     19520     21151     20605     20712     22161     21880 
+
+  # Genes in general
+nrow(inter_annotated_sum) # 189.635
+length(unique(inter_annotated_sum$B.id1)) # 27.204
+
+```
+
+
+
+```{r}
+load("/home/acost1/BALL_project/data/RNA/counts_rlog_normalized.rds")
+
+# Get the mean expression for combination of cell type and gene
+
+  # Pivot long
+NormByRlog_long <- NormByRlog %>% as.data.frame() %>%
+                    mutate(genes = rownames(NormByRlog)) %>%
+                    pivot_longer(!genes, names_to = "cell_type", values_to = "expression")
+
+  # Categories of a cell type
+NormByRlog_long$cell_type_c <- lapply(str_split(NormByRlog_long$cell_type, "_"),
+                                      function(x) x[[1]]) %>% unlist()
+
+  # Median expression
+NormByRlog_long <- NormByRlog_long %>% group_by(genes, cell_type_c) %>%
+                      summarise(expression = median(expression)) %>%
+                      filter(!cell_type_c %in% c("CMP", "Mon", "nCD8") ) %>%
+                      dplyr::rename(B.id1 = genes,
+                             cell_type = cell_type_c)
+NormByRlog_long$cell_type[NormByRlog_long$cell_type == "nB"] = "nB1Mnew"
+
+# Merge the expression with the number of enhancers, silencers
+library(biomaRt)
+
+  # See if genes are showed as symbols or ensembl code
+inter_annotated_sum$gene_type <- ifelse(startsWith(inter_annotated_sum$B.id1, "ENSG") == TRUE, "ensembl", "symbol")
+
+  # hgnc_symbol to ensembl_gene_id (those with hgnc_symbol)
+mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
+genes_ensembl <- biomaRt::getBM(filters= "hgnc_symbol",
+                                attributes = c("hgnc_symbol", "ensembl_gene_id"), 
+                                values = inter_annotated_sum$B.id1, 
+                                mart = mart) 
+inter_annotated_sum <- merge(inter_annotated_sum, genes_ensembl, by.x = "B.id1", by.y = "hgnc_symbol", all.x = TRUE)
+
+  # leave ensembl_gene_id as ensemble id
+inter_annotated_sum$ensembl_gene_id[inter_annotated_sum$gene_type == "ensembl"] <- inter_annotated_sum$B.id1[inter_annotated_sum$gene_type == "ensembl"]
+
+  # just the column with ensembl id
+inter_annotated_sum <- dplyr::select(inter_annotated_sum, !B.id1) %>%
+                       dplyr::rename(B.id1 = ensembl_gene_id )
+
+  # Merge the expression data with the combination of cell type and gene (with ensemble id)
+inter_annotated_sum <- merge(inter_annotated_sum, NormByRlog_long, by = c("B.id1", "cell_type"), all.x = TRUE)
+
+
+  # format of the number of enhancers and silencers
+inter_annotated_sum$n_EA <- as.numeric(inter_annotated_sum$n_EA)
+inter_annotated_sum$n_EPo <- as.numeric(inter_annotated_sum$n_EPo)
+inter_annotated_sum$n_EPr <- as.numeric(inter_annotated_sum$n_EPr)
+inter_annotated_sum$n_Sil <- as.numeric(inter_annotated_sum$n_Sil)
+
+  # NA in the expression
+filter(inter_annotated_sum, is.na(expression)) 
+unique(inter_annotated_sum$B.id1[ is.na(inter_annotated_sum$expression) ]) %>% length() # 2600 genes without expression
+unique(inter_annotated_sum$B.id1) %>% length() # n = 29.460 genes
+
+
+# 
+  # remove them
+inter_annotated_sum <- filter(inter_annotated_sum, !is.na(expression))  # 187.504 / 189.635 (n = 26,860 / 27.204)
+
+nrow(inter_annotated_sum)
+length(unique(inter_annotated_sum$B.id1))
+```
+
+
+
+
+```{r}
+# fix promoter state variable
+inter_annotated_sum$promoter_state_c <-  apply(data.frame(inter_annotated_sum$promoter_state), 1, function(x) {
+  check <- c(str_detect(x, "PA"),str_detect(x, "PPo"), str_detect(x, "Het") )
+  check <- as.vector(check)
+  if(identical( check, c(TRUE, FALSE, FALSE)) ) return("PA")
+  else if(identical( check, c(TRUE, TRUE, FALSE)) ) return("PA")
+  else if(identical( check, c(TRUE, TRUE, TRUE)) ) return("PA")
+  else if(identical( check, c(TRUE, FALSE, TRUE)) ) return("PA")
+  else if(identical( check, c(FALSE, TRUE, FALSE)) ) return("PPo")
+  else if(identical( check, c(FALSE, TRUE, TRUE)) ) return("PPo_Het")
+  else if(identical( check, c(FALSE, FALSE, TRUE)) ) return("Het")
+  else if(identical( check, c(FALSE, FALSE, FALSE)) ) return("none")
+  else return(NA)
+  }  ) %>% unlist()
+
+
+table(inter_annotated_sum$promoter_state_c)
+
+#     none       PA      PPo PPo_PPo2     PPo2 
+#   144835    13927     2183     9378    17181 
+
+
+
+inter_annotated_sum$promoter_state_c <- as.factor(inter_annotated_sum$promoter_state_c)
+
+inter_annotated_sum$promoter_state_c <- relevel(inter_annotated_sum$promoter_state_c, ref = "none")
+
+# Format of the cell type variable
+inter_annotated_sum$cell_type <- factor(inter_annotated_sum$cell_type, 
+                                        levels = c("HSC", "PreProB", "ProB", "PreB", 
+                                                    "immtransB", "nB1Mnew", "GCB",
+                                                    "memB", "PC"),
+                                        labels = c("HSC", "PreProB", "ProB", "PreB", 
+                                                    "immtransB", "nB1Mnew", "GCB",
+                                                    "memB", "PC"))
+
+```
+
+
+
+
+
+```{r}
+inter_annotated_sum %>% group_by(B.id1, cell_type) %>%
+  summarise(n = n()) %>%
+  filter(n > 1) # n = 241 are duplicates
+
+inter_annotated_sum <- inter_annotated_sum %>% dplyr::select(- gene_type) %>%
+                        filter(!duplicated(.))
+
+
+genes_rm <- inter_annotated_sum %>% group_by(B.id1, cell_type)  %>%
+  summarise(n = n()) %>%
+  filter(n > 1) %>% dplyr::select(B.id1) %>% unique() # n = 3
+
+inter_annotated_sum <- filter(inter_annotated_sum, !B.id1 %in% genes_rm$B.id1)
+```
+
+```{r}
+load("/home/acost1/BALL_project/results/predict_expression/inter_annotated_sum_processed.rds")
+load("/home/acost1/BALL_project/data/RNA/counts_tmm_normalized.rds")
+```
+
+
+```{r}
+NormByTMM
+# Get the mean expression for combination of cell type and gene
+
+  # Pivot long
+NormByTMM_long <- NormByTMM %>% as.data.frame() %>%
+                    mutate(genes = rownames(NormByTMM)) %>%
+                    pivot_longer(!genes, names_to = "cell_type", values_to = "expression")
+
+  # Categories of a cell type
+NormByTMM_long$cell_type_c <- lapply(str_split(NormByTMM_long$cell_type, "_"),
+                                      function(x) x[[1]]) %>% unlist()
+
+  # Median expression
+NormByTMM_long <- NormByTMM_long %>% group_by(genes, cell_type_c) %>%
+                      summarise(expression = median(expression)) %>%
+                      filter(!cell_type_c %in% c("CMP", "Mon", "nCD8") ) %>%
+                      dplyr::rename(B.id1 = genes,
+                             cell_type = cell_type_c)
+NormByTMM_long$cell_type[NormByTMM_long$cell_type == "nB"] = "nB1Mnew"
+
+```
+
+```{r}
+  # Merge the expression data with the combination of cell type and gene (with ensemble id)
+inter_annotated_sum <- merge(inter_annotated_sum, NormByTMM_long, by = c("B.id1", "cell_type"), all.x = TRUE)
+
+
+inter_annotated_sum <- rename(inter_annotated_sum,
+                               expression_deseq2 = expression.x,
+                               expression_tmm = expression.y)
+
+
+sum(is.na(inter_annotated_sum$expression_deseq2))
+```
+
+**Variables of number of enhancers and silencers as categorical**
+
+```{r}
+inter_annotated_sum$n_EA_c <- inter_annotated_sum$n_EA
+inter_annotated_sum$n_EA_c[inter_annotated_sum$n_EA > 5] <- "> 5"
+table(inter_annotated_sum$n_EA_c)
+
+inter_annotated_sum$n_EPo_c <- inter_annotated_sum$n_EPo
+inter_annotated_sum$n_EPo_c[inter_annotated_sum$n_EPo > 5] <- "> 5"
+table(inter_annotated_sum$n_EPo_c)
+
+inter_annotated_sum$n_EPr_c <- inter_annotated_sum$n_EPr
+inter_annotated_sum$n_EPr_c[inter_annotated_sum$n_EPr > 5] <- "> 5"
+table(inter_annotated_sum$n_EPr_c)
+
+inter_annotated_sum$n_Sil_c <- inter_annotated_sum$n_Sil
+inter_annotated_sum$n_Sil_c[inter_annotated_sum$n_Sil > 5] <- "> 5"
+table(inter_annotated_sum$n_Sil_c)
+
+
+inter_annotated_sum$n_EA_c <- factor(inter_annotated_sum$n_EA_c, 
+                                     levels = c("0", "1", "2", "3", "4", "5", "> 5"),
+                                     labels = c("0", "1", "2", "3", "4", "5", "> 5"))
+
+inter_annotated_sum$n_EPo_c <- factor(inter_annotated_sum$n_EPo_c, 
+                                     levels = c("0", "1", "2", "3", "4", "5", "> 5"),
+                                     labels = c("0", "1", "2", "3", "4", "5", "> 5"))
+
+inter_annotated_sum$n_EPr_c <- factor(inter_annotated_sum$n_EPr_c, 
+                                     levels = c("0", "1", "2", "3", "4", "5", "> 5"),
+                                     labels = c("0", "1", "2", "3", "4", "5", "> 5"))
+
+inter_annotated_sum$n_Sil_c <- factor(inter_annotated_sum$n_Sil_c, 
+                                     levels = c("0", "1", "2", "3", "4", "5", "> 5"),
+                                     labels = c("0", "1", "2", "3", "4", "5", "> 5"))
+
+
+
+```
+
+**Metrics**
+
+
+
+
+```{r}
+library(compareGroups)
+# Number of genes per cell type
+tapply(inter_annotated_sum$B.id1,inter_annotated_sum$cell_type , function(x) length(unique(x)))
+table(inter_annotated_sum$cell_type)
+
+
+
+res <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                       EA_chicago + EPo_chicago + EPr_chicago + Sil_chicago + 
+                     promoter_state_c  + expression_tmm , 
+                   data=filter(inter_annotated_sum, cell_type %in% c("HSC", "PreProB", "ProB", "PreB", "immtransB")),
+                   method = c(EA_chicago = 2, EPo_chicago = 2, EPr_chicago = 2, Sil_chicago = 2, expression_tmm = 2))
+
+res2 <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                        EA_chicago + EPo_chicago + EPr_chicago + Sil_chicago + 
+                     promoter_state_c  + expression_tmm , 
+                   data=filter(inter_annotated_sum, cell_type %in% c("nB1Mnew", "GCB", "memB", "PC")),
+                    method = c(EA_chicago = 2, EPo_chicago = 2, EPr_chicago = 2, Sil_chicago = 2, expression_tmm = 2))
+
+
+cbind(createTable(res, show.p.overall = FALSE), 
+createTable(res2, show.p.overall = FALSE) )
+```
+
+
+```{r}
+median_promoter <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x){
+  compareGroups(promoter_state_c ~ expression_tmm, data = filter(inter_annotated_sum, cell_type == x),
+                method = c(expression_tmm = 2)) %>% createTable()
+})
+
+
+names(median_promoter) <- levels(inter_annotated_sum$cell_type)
+```
+
+
+
+```{r}
+# Metrics stratified by limma results
+
+load("/home/acost1/BALL_project/results/limma/limma_results_sv.rds")
+
+results_dea <- lapply(results, function(x) {
+  
+  
+  x$dea_c <- "CONSTANT"
+  x$dea_c[x$log2FoldChange >= 3 & x$padj <= 0.01] <- "UP"
+  x$dea_c[x$log2FoldChange <= -3 & x$padj <= 0.01]  <- "DOWN"
+  
+  dplyr::select(x, dea_c) %>% mutate(B.id1 = rownames(x))
+}
+  
+  
+  
+  ) 
+
+
+library(purrr)
+
+results_dea <- reduce(results_dea, full_join, by = "B.id1") 
+
+colnames(results_dea)[-2] <- paste0("dea_", names(results))
+  
+  
+
+inter_annotated_sum <- merge(inter_annotated_sum, results_dea, by = "B.id1", all.x = TRUE)
+
+
+compareGroups(dea_prepro ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                   promoter_state_c  + expression_tmm , 
+                   data=filter(inter_annotated_sum, cell_type %in% "PreProB"),
+                   method = c(expression_tmm = 2)) %>% createTable( show.p.overall = TRUE)
+
+
+compareGroups(dea_nB ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                   promoter_state_c  + expression_tmm , 
+                   data=filter(inter_annotated_sum, cell_type %in% "nB1Mnew"),
+                   method = c(expression_tmm = 2)) %>% createTable( show.p.overall = TRUE)
+
+
+compareGroups(dea_plasma ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                   promoter_state_c  + expression_tmm , 
+                   data=filter(inter_annotated_sum, cell_type %in% "PC"),
+                   method = c(expression_tmm = 2)) %>% createTable( show.p.overall = TRUE)
+```
+
+
+
+```{r}
+load("/home/acost1/BALL_project/results/predict_expression/group_mclust.rds")
+
+# mod1$classification
+
+res <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                       EA_chicago + EPo_chicago + EPr_chicago + Sil_chicago + 
+                     promoter_state_c  + expression , 
+                   data=inter_annotated_sum %>% filter(B.id1 %in% names(mod1$classification[mod1$classification == 3]) ) %>%
+                                              filter( cell_type %in% c("HSC", "PreProB", "ProB", "PreB", "immtransB") ),
+                   method = c(EA_chicago = 2, EPo_chicago = 2, EPr_chicago = 2, Sil_chicago = 2, expression = 2))
+
+res2 <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                        EA_chicago + EPo_chicago + EPr_chicago + Sil_chicago + 
+                     promoter_state_c  + expression , 
+                   data= inter_annotated_sum %>% filter(B.id1 %in% names(mod1$classification[mod1$classification == 3]) ) %>%
+                                                  filter( cell_type %in%c("nB1Mnew", "GCB", "memB", "PC") ),
+                    method = c(EA_chicago = 2, EPo_chicago = 2, EPr_chicago = 2, Sil_chicago = 2, expression = 2))
+
+
+cbind(createTable(res, show.p.overall = FALSE),  createTable(res2, show.p.overall = FALSE) )
+
+
+
+
+res <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                       EA_chicago + EPo_chicago + EPr_chicago + Sil_chicago + 
+                     promoter_state_c  + expression , 
+                   data=inter_annotated_sum %>% filter(B.id1 %in% names(mod1$classification[mod1$classification == 4]) ) %>%
+                                              filter( cell_type %in% c("HSC", "PreProB", "ProB", "PreB", "immtransB") ),
+                   method = c(EA_chicago = 2, EPo_chicago = 2, EPr_chicago = 2, Sil_chicago = 2, expression = 2))
+
+res2 <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                        EA_chicago + EPo_chicago + EPr_chicago + Sil_chicago + 
+                     promoter_state_c  + expression , 
+                   data= inter_annotated_sum %>% filter(B.id1 %in% names(mod1$classification[mod1$classification == 4]) ) %>%
+                                                  filter( cell_type %in%c("nB1Mnew", "GCB", "memB", "PC") ),
+                    method = c(EA_chicago = 2, EPo_chicago = 2, EPr_chicago = 2, Sil_chicago = 2, expression = 2))
+
+
+cbind(createTable(res, show.p.overall = FALSE),  createTable(res2, show.p.overall = FALSE) )
+
+
+
+
+res <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                       EA_chicago + EPo_chicago + EPr_chicago + Sil_chicago + 
+                     promoter_state_c  + expression_tmm , 
+                   data=inter_annotated_sum %>% filter(B.id1 %in% names(mod1$classification[mod1$classification == 8]) ) %>%
+                                              filter( cell_type %in% c("HSC", "PreProB", "ProB", "PreB", "immtransB") ),
+                   method = c(EA_chicago = 2, EPo_chicago = 2, EPr_chicago = 2, Sil_chicago = 2, expression = 2))
+
+res2 <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                        EA_chicago + EPo_chicago + EPr_chicago + Sil_chicago + 
+                     promoter_state_c  + expression_tmm , 
+                   data= inter_annotated_sum %>% filter(B.id1 %in% names(mod1$classification[mod1$classification == 8]) ) %>%
+                                                  filter( cell_type %in%c("nB1Mnew", "GCB", "memB", "PC") ),
+                    method = c(EA_chicago = 2, EPo_chicago = 2, EPr_chicago = 2, Sil_chicago = 2, expression = 2))
+
+cbind(createTable(res, show.p.overall = FALSE),  createTable(res2, show.p.overall = FALSE) )
+
+
+
+res <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                       EA_chicago + EPo_chicago + EPr_chicago + Sil_chicago + 
+                     promoter_state_c  + expression , 
+                   data=inter_annotated_sum %>% filter(B.id1 %in% names(mod1$classification[mod1$classification == 9]) ) %>%
+                                              filter( cell_type %in% c("HSC", "PreProB", "ProB", "PreB", "immtransB") ),
+                   method = c(EA_chicago = 2, EPo_chicago = 2, EPr_chicago = 2, Sil_chicago = 2, expression = 2))
+
+res2 <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                        EA_chicago + EPo_chicago + EPr_chicago + Sil_chicago + 
+                     promoter_state_c  + expression , 
+                   data= inter_annotated_sum %>% filter(B.id1 %in% names(mod1$classification[mod1$classification == 9]) ) %>%
+                                                  filter( cell_type %in%c("nB1Mnew", "GCB", "memB", "PC") ),
+                    method = c(EA_chicago = 2, EPo_chicago = 2, EPr_chicago = 2, Sil_chicago = 2, expression = 2))
+
+
+cbind(createTable(res, show.p.overall = FALSE),  createTable(res2, show.p.overall = FALSE) )
+```
+
+
+**Linear models**
+
+```{r}
+# Linear models without promoter state
+linear_models <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x)
+  lm(expression_tmm~ n_EA + n_EPo + n_EPr + n_Sil, 
+     data = filter(inter_annotated_sum, cell_type == x)) ) 
+names(linear_models) <- levels(inter_annotated_sum$cell_type)
+
+
+export_summs(linear_models$HSC, linear_models$PreProB, linear_models$ProB,
+           linear_models$PreB, linear_models$immtransB, linear_models$nB1Mnew,
+           linear_models$GCB, linear_models$memB,
+           linear_models$PC, scale = FALSE, error_format = "[{conf.low}, {conf.high}]", 
+           model.names = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"),
+           to.file = "html", file.name = "/home/acost1/BALL_project/results/predict_expression/linear_model_tmm.html")
+
+
+
+# Linear models with promoter state
+linear_models <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x)
+  lm(expression ~ promoter_state_c + n_EA + n_EPo + n_EPr + n_Sil, 
+     data = filter(inter_annotated_sum, cell_type == x)) ) 
+names(linear_models) <- levels(inter_annotated_sum$cell_type)
+
+mse <- lapply(linear_models, function(x) mean(x$residuals^2) )
+
+predict(linear_models, interval = "prediction")
+
+export_summs(linear_models$HSC, linear_models$PreProB, linear_models$ProB,
+           linear_models$PreB, linear_models$immtransB, linear_models$nB1Mnew,
+           linear_models$GCB, linear_models$memB,
+           linear_models$PC, scale = FALSE, error_format = "[{conf.low}, {conf.high}]", 
+           model.names = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"),
+           to.file = "html", file.name = "/home/acost1/BALL_project/results/predict_expression/linear_model_promoter_tmm.html")
+
+
+
+# Linear models with chicago score 
+linear_models <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x)
+  lm(expression_tmm ~ promoter_state_c + EA_chicago +EPo_chicago +  EPr_chicago  + Sil_chicago, 
+     data = filter(inter_annotated_sum, cell_type == x)) ) 
+names(linear_models) <- levels(inter_annotated_sum$cell_type)
+
+
+export_summs(linear_models$HSC, linear_models$PreProB, linear_models$ProB,
+           linear_models$PreB, linear_models$immtransB, linear_models$nB1Mnew,
+           linear_models$GCB, linear_models$memB,
+           linear_models$PC, scale = FALSE, error_format = "[{conf.low}, {conf.high}]", 
+           model.names = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"),
+           to.file = "html", file.name = "/home/acost1/BALL_project/results/predict_expression/test_chicago_tmm.html")
+
+
+
+# Prova
+
+apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x)
+  lm(expression ~ promoter_state_c + median_chicago, 
+     data = filter(inter_annotated_sum, cell_type == x)) %>% summary() ) 
+names(linear_models) <- levels(inter_annotated_sum$cell_type)
+
+```
+
+
+Train and test on HSC and chromosome 1 (80%, 20%)
+
+```{r}
+# Filter data
+inter_annotated_hsc1 <- filter(inter_annotated_sum, cell_type == "HSC" & seqnames1 == "1")
+
+# sample size
+smp_size <- floor(0.8 * nrow(inter_annotated_hsc1))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+
+# get train ids
+train_ind <- sample(seq_len(nrow(inter_annotated_hsc1)), size = smp_size)
+
+# partition
+train <- inter_annotated_hsc1[train_ind, ]
+test <- inter_annotated_hsc1[-train_ind, ]
+
+# linear model
+linear_models_hsc1 <- lm(expression ~ promoter_state_c + n_EA + n_EPo + n_EPr + n_Sil, 
+     data =  train) 
+
+# prediction
+y_hat <- predict(linear_models_hsc1, test) 
+
+mean((y_hat - test$expression)^2) # MSE = 21.20 
+
+cor(y_hat, test$expression) # 0.26 correlation
+
+mae(y_hat, test$expression) # 4.11
+
+
+plot(y_hat, test$expression)
+```
+
+
+Train on HSC chromosome 1 and test on HSC chromosome 2 
+
+```{r}
+train <- filter(inter_annotated_sum, cell_type == "HSC" & seqnames1 == "1" )
+test <- filter(inter_annotated_sum, cell_type == "HSC" & seqnames1 == "2" )
+
+linear_models_hsc1 <- lm(expression ~ promoter_state_c + n_EA + n_EPo + n_EPr + n_Sil, 
+     data =  train ) 
+
+# prediction
+y_hat <- predict(linear_models_hsc1, test) 
+
+mean((y_hat - test$expression)^2) # MSE = 20.65 
+
+cor(y_hat, test$expression) # 0.37 correlation
+
+mae(y_hat, test$expression)
+```
+
+
+Cross-validation on each stage (folds as individual chromosomes)
+
+```{r}
+# folds
+names_chromosome <- names(table(inter_annotated_sum$seqnames1) )
+names_celltypes <- names(table(inter_annotated_sum$cell_type))
+
+names_all <- expand.grid(names_chromosome, names_celltypes)
+ids_chromosome_train <- apply(names_all, 1, function(x)
+                        return(inter_annotated_sum$seqnames1 != x[1] & inter_annotated_sum$cell_type == x[2]) )
+
+# function with k-fold cross validation
+kfold_cv <- function(x){ 
+  # Dataset
+  train <- x[[1]]
+  test <- x[[2]]
+  
+  
+  linear_models_hsc1 <- lm(expression ~ promoter_state_c + n_EA + n_EPo + n_EPr + n_Sil, 
+      data =  train ) 
+
+  # prediction
+  y_hat <- predict(linear_models_hsc1, test) 
+
+  mse <- mean((y_hat - test$expression)^2) 
+
+  cor <- cor(y_hat, test$expression) 
+  
+  mae <- mae(y_hat, test$expression)
+  
+  return(c("mse"= mse, "correlation" = cor, "mae" = mae))
+}
+
+results_cv <- apply(ids_chromosome_train, 2, function(x){
+  train <- inter_annotated_sum[x,]
+  test <- inter_annotated_sum[!x,]
+  
+  results_cv <- kfold_cv(list(train, test))
+  
+  results_cv} )
+
+
+colnames(results_cv) <- paste(names_all$Var2, names_all$Var1)
+
+results_cv
+
+
+# MSE
+tapply(results_cv[1,], names_all$Var2, mean)
+tapply(results_cv[1,], names_all$Var2, sd)
+
+# Correlation
+tapply(results_cv[2,], names_all$Var2, mean)
+tapply(results_cv[2,], names_all$Var2, sd)
+
+# MAE
+tapply(results_cv[3,], names_all$Var2, mean)
+tapply(results_cv[3,], names_all$Var2, sd)
+```
+
+
+Train, validation on HSC and test in PreProB
+
+```{r}
+# linear model
+linear_models_hsc <- lm(expression ~ promoter_state_c + n_EA + n_EPo + n_EPr + n_Sil, 
+     data = filter(inter_annotated_sum, cell_type == "HSC" )) 
+
+# prediction
+test <- filter(inter_annotated_sum, cell_type == "PreProB" )
+y_hat <- predict(linear_models_hsc, test) 
+
+mean((y_hat - test$expression)^2) # MSE = 21.20 
+
+mae(y_hat, test$expression)
+```
+
+
+
+**Descriptives: Boxplots** 
+
+```{r}
+tapply(inter_annotated_sum$expression, inter_annotated_sum$n_EA_c, summary)
+tapply(inter_annotated_sum$expression, inter_annotated_sum$n_EPo_c, summary)
+tapply(inter_annotated_sum$expression, inter_annotated_sum$n_EPr_c, summary)
+tapply(inter_annotated_sum$expression, inter_annotated_sum$n_Sil_c, summary)
+
+
+
+boxplot_ea <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x){
+  boxplot(inter_annotated_sum$expression[inter_annotated_sum$cell_type == x] ~
+          inter_annotated_sum$n_EA_c[inter_annotated_sum$cell_type == x],
+          xlab = "Number of Enhancer Active", ylab = "Expression", 
+          main = x)
+})
+
+
+boxplot_epo <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x){
+  boxplot(inter_annotated_sum$expression[inter_annotated_sum$cell_type == x] ~
+          inter_annotated_sum$n_EPo_c[inter_annotated_sum$cell_type == x],
+          xlab = "Number of Enhancer Poised", ylab = "Expression", 
+          main = x)
+})
+
+
+boxplot_epr <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x){
+  boxplot(inter_annotated_sum$expression[inter_annotated_sum$cell_type == x] ~
+          inter_annotated_sum$n_EPr_c[inter_annotated_sum$cell_type == x],
+          xlab = "Number of Enhancer Primed", ylab = "Expression", 
+          main = x)
+})
+
+boxplot_sil <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x){
+  boxplot(inter_annotated_sum$expression[inter_annotated_sum$cell_type == x] ~
+          inter_annotated_sum$n_Sil_c[inter_annotated_sum$cell_type == x],
+          xlab = "Number of Silencers", ylab = "Expression", 
+          main = x)
+})
+
+
+# Mean comparison
+aov(expression ~ n_EPr_c, filter(inter_annotated_sum, cell_type == "HSC")) %>% summary()
+aov(expression ~ n_EA_c, filter(inter_annotated_sum, cell_type == "HSC")) %>% summary()
+aov(expression ~ n_EPo_c, filter(inter_annotated_sum, cell_type == "HSC")) %>% summary()
+
+# "HSC"       "PreProB"   "ProB"      "PreB"      "immtransB" "nB1Mnew"   "GCB"       "memB"      "PC"
+```
+
+
+
+
+**Descriptives: correlations, scatterplot and summary(min, max, mean, median)**
+
+```{r}
+# Descriptius
+
+  # - Correlations for each cell type
+correlations <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x){
+  c(cor(inter_annotated_sum$n_EA[inter_annotated_sum$cell_type == x], inter_annotated_sum$expression[inter_annotated_sum$cell_type == x]),
+  cor(inter_annotated_sum$n_EPo[inter_annotated_sum$cell_type == x], inter_annotated_sum$expression[inter_annotated_sum$cell_type == x]),
+  cor(inter_annotated_sum$n_EPr[inter_annotated_sum$cell_type == x], inter_annotated_sum$expression[inter_annotated_sum$cell_type == x]),
+  cor(inter_annotated_sum$n_Sil[inter_annotated_sum$cell_type == x], inter_annotated_sum$expression[inter_annotated_sum$cell_type == x]) )
+})
+
+correlations <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x){
+  c(cor.test(inter_annotated_sum$n_EA[inter_annotated_sum$cell_type == x], inter_annotated_sum$expression[inter_annotated_sum$cell_type == x])$p.value,
+  cor.test(inter_annotated_sum$n_EPo[inter_annotated_sum$cell_type == x], inter_annotated_sum$expression[inter_annotated_sum$cell_type == x])$p.value,
+  cor.test(inter_annotated_sum$n_EPr[inter_annotated_sum$cell_type == x], inter_annotated_sum$expression[inter_annotated_sum$cell_type == x])$p.value,
+  cor.test(inter_annotated_sum$n_Sil[inter_annotated_sum$cell_type == x], inter_annotated_sum$expression[inter_annotated_sum$cell_type == x])$p.value )
+}) 
+
+colnames(correlations) <- levels(inter_annotated_sum$cell_type)
+
+
+
+  # Scatter plot for each cell type
+scatter_plot <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x){
+plot(inter_annotated_sum$expression[inter_annotated_sum$cell_type == x] ~
+          inter_annotated_sum$n_EA[inter_annotated_sum$cell_type == x])
+})
+
+  # Summary (min, max, median) for each cell type
+summary <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x){
+tapply(inter_annotated_sum$expression[inter_annotated_sum$cell_type == x],
+          inter_annotated_sum$n_Sil[inter_annotated_sum$cell_type == x], summary)
+})
+```
+
+
+
+**Model lineal mixte**
+
+```{r}
+library(nlme)
+
+# Model with numerical variables
+mod <- lme(expression ~ as.numeric(cell_type) + n_EA + n_EPr + n_EPo + n_Sil + 
+             as.numeric(cell_type) * promoter_state_c,
+      data = inter_annotated_sum,
+      random = ~ as.numeric(cell_type) | factor(B.id1),
+      na.action = na.omit) %>%
+  summary()
+mod
+```
+
+
+S'observa que l'expressió va disminuir, en mitjana, 0.023, per cada estadi de més i mantenint constant el número de EA, EPr, EPo i Silencers (p-valor <0.001).
+
+També, es va veure que en qualsevol estadi on es va mesurar l'expressió, aquesta va augmentar en 0.023, per cada enhancer prime de més i mantenint
+constant la variable temporal (p-valor <0.001).
+
+També, es va veure que en qualsevol estadi on es va mesurar l'expressió, aquesta va diminuir en 0.007, per cada enhancer poised de més i mantenint
+constant la variable temporal (p-valor <0.001).
+
+
+afegir comentaris dels promoter state
+
+```{r}
+# Model with categorical variables
+mod <- lme(expression ~ as.numeric(cell_type) + as.numeric(cell_type)*n_EA_c +
+           as.numeric(cell_type)*n_EPr_c + as.numeric(cell_type)*n_EPo_c + as.numeric(cell_type)*n_Sil_c +
+            as.numeric(cell_type)*promoter_state_c ,
+      data = inter_annotated_sum,
+      random = ~ 1 | factor(B.id1),
+      na.action = na.omit) %>%
+  summary()
+mod
+```
+
+
+```{r include = TRUE, fig.height=4, fig.width=6}
+library(lme4)
+library(effects)
+
+
+
+# LOESS with groups of genes
+
+load("/home/acost1/BALL_project/results/predict_expression/group_mclust.rds")
+
+# Mostly expressed in HSC
+names(mod1$classification[mod1$classification == 8]) %>% length() 
+
+
+
+inter_annotated_sum %>% filter(B.id1 %in% names(mod1$classification[mod1$classification == 8]) ) %>%
+  ggplot(aes(y=expression, x = as.numeric(cell_type),  col = n_EA_c, fill = n_EA_c))+
+  geom_smooth(method = "loess", fill = "black", aes(col = "All", fill = "All"), se = T, alpha = 0.2 )+
+  geom_smooth(method = "loess", fill = "black", se = T, alpha = 0.2, aes(group=n_EA_c))+
+  xlab("Cell types") + ylab("Expression") + theme(legend.position = "top")+
+  theme_classic()+
+  scale_x_continuous(breaks = 1:9)
+
+
+names(mod1$classification == 9) %>% length() # 5316
+
+
+# Only found 4755 genes
+inter_annotated_sum %>% filter(B.id1 %in% names(mod1$classification[mod1$classification == 9]) ) %>%
+  ggplot(aes(y=expression, x = as.numeric(cell_type),  col = n_EA_c, fill = n_EA_c))+
+  geom_smooth(method = "loess", fill = "black", aes(col = "All", fill = "All"), se = T, alpha = 0.2 )+
+  geom_smooth(method = "loess", fill = "black", se = T, alpha = 0.2, aes(group=n_EA_c))+
+  xlab("Cell types") + ylab("Expression") + theme(legend.position = "top")+
+  theme_classic()+
+  scale_x_continuous(breaks = 1:9)
+
+
+
+inter_annotated_sum %>% filter(B.id1 %in% names(mod1$classification[mod1$classification == 3]) ) %>%
+  ggplot(aes(y=expression, x = as.numeric(cell_type),  col = n_EA_c, fill = n_EA_c))+
+  geom_smooth(method = "loess", fill = "black", aes(col = "All", fill = "All"), se = T, alpha = 0.2 )+
+  geom_smooth(method = "loess", fill = "black", se = T, alpha = 0.2, aes(group=n_EA_c))+
+  xlab("Cell types") + ylab("Expression") + theme(legend.position = "top")+
+  theme_classic()+
+  scale_x_continuous(breaks = 1:9)
+
+```
+
+
+
+
+```{r}
+# Linear models with promoter state
+
+# SUBSET
+linear_models <- apply(data.frame(levels(inter_annotated_sum$cell_type)), 1, function(x)
+  lm(expression ~ n_EA + n_EPo + n_EPr + n_Sil + promoter_state_c, 
+     data = filter(inter_annotated_sum, cell_type == x) %>%
+            filter(B.id1 %in% names(mod1$classification[mod1$classification == 3]) ) )
+    ) 
+names(linear_models) <- levels(inter_annotated_sum$cell_type)
+
+
+export_summs(linear_models$HSC, linear_models$PreProB, linear_models$ProB,
+           linear_models$PreB, linear_models$immtransB, linear_models$nB1Mnew,
+           linear_models$GCB, linear_models$memB,
+           linear_models$PC, scale = FALSE, error_format = "[{conf.low}, {conf.high}]", 
+           model.names = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"),
+           to.file = "html", file.name = "/home/acost1/BALL_project/results/predict_expression/linear_model_pc.html")
+
+
+```
+
+
+
+```{r}
+res <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                     promoter_state_c + median_chicago + expression , 
+                   data=filter(inter_annotated_sum, cell_type %in% c("HSC", "PreProB", "ProB", "PreB", "immtransB")) %>%
+                     filter(B.id1 %in% names(mod1$classification[mod1$classification == 3]) ),
+                   method = c(median_chicago=2, expression = 2))
+
+res2 <- compareGroups(cell_type ~ n_EA_c + n_EPo_c + n_EPr_c + n_Sil_c +
+                     promoter_state_c + median_chicago + expression , 
+                   data=filter(inter_annotated_sum, cell_type %in% c("nB1Mnew", "GCB", "memB", "PC")) %>%
+                     filter(B.id1 %in% names(mod1$classification[mod1$classification == 3]) ),
+                    method = c(median_chicago=2, expression = 2))
+
+
+cbind(createTable(res, show.p.overall = FALSE), 
+createTable(res2, show.p.overall = FALSE) )
+```
+

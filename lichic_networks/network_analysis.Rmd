@@ -1,0 +1,716 @@
+---
+title: "Network analysis"
+author: "Anna CG"
+date: "2024-11-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, error = FALSE)
+```
+
+```{r}
+# Packages
+library(igraph)
+library(dplyr)
+library(Matrix)
+library(gplots)
+
+library(pheatmap)
+library(RColorBrewer)
+```
+
+
+```{r}
+# Load data
+load("/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit.rds")
+load("/home/acost1/BALL_project/results/gnn/edge_file_notsplit.rds")
+```
+
+
+```{r}
+# Create igraph network
+network_celltype <- function(cell_type_select){
+  edge_file <- filter(edge_file,  cell_type == cell_type_select)
+  id_bed <- filter(id_bed, cell_type == cell_type_select)
+  
+  links <- data.frame(
+        source = edge_file$ID_1,
+        target = edge_file$ID_2
+        )
+
+  nodes <- data.frame(
+              name = id_bed$id,
+              carac = id_bed$type ) %>%
+             filter(!duplicated(.))
+
+  # Turn it into igraph object
+  network <- graph_from_data_frame(d=links, vertices=nodes, directed=F)
+}
+```
+
+```{r}
+all_cell_types <- names(table(id_bed$cell_type))
+all_networks <- apply(data.frame(all_cell_types), 1, function(x) network_celltype(x) )
+```
+
+```{r}
+length(unique(id_bed$id))
+length(unique(V(all_networks[[2]])$name ))
+```
+
+
+
+1. Node and edge conservation
+
+```{r}
+# Calculate conserved nodes across stages
+conserved_OE <- Reduce(intersect, lapply(all_networks, function(g) V(g)$name[V(g)$carac == "OE"]))
+all_OE <- unique(sapply(all_networks, function(g) V(g)$name[V(g)$carac == "OE"]) %>% unlist)
+
+length(conserved_OE)
+length(all_OE)
+
+conserved_B <- Reduce(intersect, lapply(all_networks, function(g) V(g)$name[V(g)$carac == "B"]))
+all_B <- unique(sapply(all_networks, function(g) V(g)$name[V(g)$carac == "B"]) %>% unlist)
+
+length(conserved_B)
+length(all_B)
+
+# Calculate conserved edges across stages
+edge_list <- lapply(all_networks, get.edgelist) %>%
+              lapply(., function(x) apply(x, 1, paste, collapse = "-") )
+all_edges <- unique(edge_list %>% unlist)
+conserved_edges <- Reduce(intersect, edge_list)
+print("Conserved edges across all stages:")
+print(length(conserved_edges))
+print(length(all_edges))
+```
+
+
+Pairwaise matrix node conservation
+```{r}
+# Initialize a matrix to store node overlap counts / jaccard
+B_overlap_matrix <- matrix(0, nrow = 9, ncol = 9)
+OE_overlap_matrix <- matrix(0, nrow = 9, ncol = 9)
+
+jaccard_similarity_B <- matrix(0, nrow = 9, ncol = 9)
+jaccard_similarity_OE <- matrix(0, nrow = 9, ncol = 9)
+
+# Calculate node overlap between each pair of stages
+for (i in 1:(9 - 1)) {
+  for (j in (i + 1):9) {
+    # Find common nodes between stages i and j
+    nodes_B_i <- V(all_networks[[i]])$name[V(all_networks[[i]])$carac == "B"]
+    nodes_B_j <- V(all_networks[[j]])$name[V(all_networks[[i]])$carac == "B"]
+    
+    common_B <- intersect(nodes_B_i, nodes_B_j)
+    
+    nodes_OE_i <- V(all_networks[[i]])$name[V(all_networks[[i]])$carac == "OE"]
+    nodes_OE_j <- V(all_networks[[j]])$name[V(all_networks[[i]])$carac == "OE"]
+    
+    common_OE <- intersect(nodes_OE_i, nodes_OE_j)
+    
+    # Store the count of common nodes
+    B_overlap_matrix[i, j] <- length(common_B)
+    B_overlap_matrix[j, i] <- B_overlap_matrix[i, j] # Symmetric matrix
+    
+    OE_overlap_matrix[i, j] <- length(common_OE)
+    OE_overlap_matrix[j, i] <- OE_overlap_matrix[i, j] # Symmetric matrix
+    
+    
+    # Jaccard
+    intersection <- length(common_B)
+    union <- length(union(nodes_B_i, nodes_B_j))
+    jaccard_similarity_B[i, j] <- intersection / union
+    jaccard_similarity_B[j, i] <- jaccard_similarity_B[i, j] # Symmetric matrix
+    
+    intersection <- length(common_OE)
+    union <- length(union(nodes_OE_i, nodes_OE_j))
+    jaccard_similarity_OE[i, j] <- intersection / union
+    jaccard_similarity_OE[j, i] <- jaccard_similarity_OE[i, j] # Symmetric matrix
+    
+  }
+}
+
+# Add stage labels
+colnames(B_overlap_matrix) <- all_cell_types
+rownames(B_overlap_matrix) <- all_cell_types
+
+colnames(OE_overlap_matrix) <- all_cell_types
+rownames(OE_overlap_matrix) <- all_cell_types
+
+palette <- colorRampPalette(brewer.pal(n = 7, name = "Greens"))(100)
+
+id_bed_B <- filter(id_bed, type == "B")
+diag(B_overlap_matrix) <- tapply(id_bed_B$id, id_bed_B$cell_type, function(x) length(unique(x)))
+
+id_bed_OE <- filter(id_bed, type == "OE")
+diag(OE_overlap_matrix) <- tapply(id_bed_OE$id, id_bed_OE$cell_type, function(x) length(unique(x)))
+
+# Plot heatmap
+
+breaks <- seq(0, 1, length.out = 100)
+
+
+png("/home/acost1/BALL_project/results/networks/bait_conservation_number.png", width = 50, height = 25, res = 300, units = "cm")
+pheatmap(B_overlap_matrix,
+        cluster_rows = FALSE, 
+         cluster_cols = FALSE,
+         display_numbers = TRUE,
+         number_format = "%.0f",
+         color = palette,
+         border_color = NA,
+         fontsize = 15,
+         main = "Bait Conservation Heatmap",
+         fontsize_row = 15,
+         fontsize_col = 15)
+dev.off()
+
+png("/home/acost1/BALL_project/results/networks/OE_conservation_number.png", width = 50, height = 25, res = 300, units = "cm")
+pheatmap(OE_overlap_matrix,
+        cluster_rows = FALSE, 
+         cluster_cols = FALSE,
+         display_numbers = TRUE,
+         number_format = "%.0f",
+         color = palette,
+         border_color = NA,
+         fontsize = 15,
+         main = "OE Conservation Heatmap",
+         fontsize_row = 15,
+         fontsize_col = 15)
+dev.off()
+
+colnames(jaccard_similarity_B) <- all_cell_types
+rownames(jaccard_similarity_B) <- all_cell_types
+
+colnames(jaccard_similarity_OE) <- all_cell_types
+rownames(jaccard_similarity_OE) <- all_cell_types
+
+diag(jaccard_similarity_B) <- 1
+diag(jaccard_similarity_OE) <- 1
+
+
+breaks <- seq(0, 1, length.out = 100)
+
+png("/home/acost1/BALL_project/results/networks/bait_conservation_jaccard.png", width = 50, height = 25, res = 300, units = "cm")
+pheatmap(jaccard_similarity_B, 
+         cluster_rows = FALSE, 
+         cluster_cols = FALSE,
+         display_numbers = TRUE,
+         number_format = "%.2f",
+         breaks = breaks,
+         number_color  = "black",
+         color = palette,
+         border_color = NA,
+         fontsize = 15,
+         main = "Bait Conservation Heatmap (Jaccard Index)",
+         fontsize_row = 15,
+         fontsize_col = 15)
+dev.off()
+
+
+png("/home/acost1/BALL_project/results/networks/oe_conservation_jaccard.png", width = 50, height = 25, res = 300, units = "cm")
+pheatmap(jaccard_similarity_OE, 
+         cluster_rows = FALSE, 
+         cluster_cols = FALSE,
+         display_numbers = TRUE,
+         number_format = "%.2f",
+         breaks = breaks,
+         color = palette,
+         border_color = NA,
+         fontsize = 15,
+         number_color  = "black",
+         main = "OE Conservation Heatmap (Jaccard Index)",
+         fontsize_row = 15,
+         fontsize_col = 15)
+dev.off()
+```
+
+Pairwaise matrix interactions conservation
+```{r}
+# Initialize a matrix to store node overlap counts
+interaction_overlap_matrix <- matrix(0, nrow = 9, ncol = 9)
+
+# Calculate interaction overlap between each pair of stages
+for (i in 1:(9 - 1)) {
+  for (j in (i + 1):9) {
+    # Find common interactions between stages i and j
+    common_interactions <- intersect(edge_list[[i]], edge_list[[j]])
+    # Store the count of common interactions
+    interaction_overlap_matrix[i, j] <- length(common_interactions)
+    interaction_overlap_matrix[j, i] <- interaction_overlap_matrix[i, j] # Symmetric matrix
+  }
+}
+
+# Optionally, normalize overlap by total nodes to get a proportion
+# node_overlap_matrix <- node_overlap_matrix / num_nodes
+
+# Add stage labels
+colnames(interaction_overlap_matrix) <- all_cell_types
+rownames(interaction_overlap_matrix) <- all_cell_types
+
+diag(interaction_overlap_matrix) <- sapply(edge_list, length)
+
+# Plot heatmap
+png("/home/acost1/BALL_project/results/networks/interaction_conservation_number.png", width = 50, height = 25, res = 300, units = "cm")
+pheatmap(interaction_overlap_matrix,
+        cluster_rows = FALSE, 
+         cluster_cols = FALSE,
+         display_numbers = TRUE,
+         number_format = "%.0f",
+         color = palette,
+         border_color = NA,
+         fontsize = 15,
+         main = "Interaction Conservation Heatmap",
+         fontsize_row = 15,
+         fontsize_col = 15)
+dev.off()
+
+# Interaction Conservation: Compute pairwise Jaccard similarity index
+jaccard_similarity <- matrix(0, nrow = 9, ncol = 9)
+rownames(jaccard_similarity) <- all_cell_types
+colnames(jaccard_similarity) <- all_cell_types
+
+for (i in 1:9) {
+  interactions_i <- edge_list[[i]]
+  for (j in 1:9) {
+    interactions_j <- edge_list[[j]]
+    intersection <- length(intersect(interactions_i, interactions_j))
+    union <- length(union(interactions_i, interactions_j))
+    jaccard_similarity[i, j] <- intersection / union
+  }
+}
+
+# 2. Plot Heatmap of Interaction Conservation
+
+# Plot using pheatmap
+png("/home/acost1/BALL_project/results/networks/interaction_conservation_jaccard.png", width = 50, height = 25, res = 300, units = "cm")
+pheatmap(jaccard_similarity, 
+         cluster_rows = FALSE, 
+         cluster_cols = FALSE,
+         display_numbers = TRUE,
+         number_format = "%.2f",
+         breaks = breaks,
+         color = palette,
+         border_color = NA,
+         fontsize = 15,
+         main = "Interaction Conservation Heatmap (Jaccard Index)",
+         fontsize_row = 15,
+         fontsize_col = 15)
+dev.off()
+```
+
+
+2. Community Detection and Comparison
+
+
+```{r}
+network_celltype <- function(cell_type_select){
+  edge_file <- filter(edge_file,  cell_type == cell_type_select)
+  id_bed <- select(id_bed, id, type) %>% filter(!duplicated(.))
+  
+  links <- data.frame(
+        source = edge_file$ID_1,
+        target = edge_file$ID_2
+        )
+
+  nodes <- data.frame(
+              name = id_bed$id,
+              carac = id_bed$type ) %>%
+             filter(!duplicated(.))
+
+  # Turn it into igraph object
+  network <- graph_from_data_frame(d=links, vertices=nodes, directed=F)
+}
+
+
+all_networks <- apply(data.frame(all_cell_types), 1, function(x) network_celltype(x) )
+```
+
+
+```{r}
+# Apply Louvain community detection for each network
+communities <- lapply(all_networks, function(g) cluster_louvain(g))
+
+# Calculate NMI between each pair of stages to assess community similarity
+nmi_matrix <- matrix(0, 9, 9)
+ari_matrix <-  matrix(0, 9, 9)
+for (i in 1:(9 - 1)) {
+  for (j in (i + 1):9) {
+    nmi_matrix[i, j] <- compare(communities[[i]], communities[[j]], method = "nmi")
+    nmi_matrix[j, i] <- nmi_matrix[i, j]
+    
+    ari_matrix[i, j] <- compare(communities[[i]], communities[[j]], method = "adjusted.rand")
+    ari_matrix[j, i] <- ari_matrix[i, j]
+  }
+}
+print("NMI Matrix for community similarity between stages:")
+print(nmi_matrix)
+print(ari_matrix)
+
+
+# # Function to get common subgraph based on shared nodes
+# get_common_subgraph <- function(g1, g2) {
+#   common_nodes <- intersect(V(g1)$name, V(g2)$name)
+#   sub_g1 <- induced_subgraph(g1, vids = V(g1)$name %in% common_nodes)
+#   sub_g2 <- induced_subgraph(g2, vids = V(g2)$name %in% common_nodes)
+#   return(list(sub_g1, sub_g2))
+# }
+# 
+# # Applying community detection and comparing communities for each pair
+# num_stages <- length(all_networks) # Assuming 'networks' is a list of the stage graphs
+# nmi_matrix <- matrix(0, num_stages, num_stages)
+# rownames(nmi_matrix) <- all_cell_types
+# colnames(nmi_matrix) <- all_cell_types
+# 
+# for (i in 1:(num_stages - 1)) {
+#   for (j in (i + 1):num_stages) {
+#     # Get common subgraphs for stages i and j
+#     subgraphs <- get_common_subgraph(all_networks[[i]], all_networks[[j]])
+#     sub_g1 <- subgraphs[[1]]
+#     sub_g2 <- subgraphs[[2]]
+#     
+#     # Run community detection on the subgraphs
+#     comm1 <- cluster_louvain(sub_g1)
+#     comm2 <- cluster_louvain(sub_g2)
+#     
+#     # Compare communities using NMI
+#     nmi_matrix[i, j] <- compare(comm1, comm2, method = "nmi")
+#     nmi_matrix[j, i] <- nmi_matrix[i, j]  # Mirror the value for symmetry
+#   }
+# }
+# 
+# print("NMI Matrix for community similarity between stages:")
+# print(nmi_matrix)
+
+rownames(nmi_matrix) <- all_cell_types
+colnames(nmi_matrix) <- all_cell_types
+
+diag(nmi_matrix) <- 1
+
+png("/home/acost1/BALL_project/results/networks/community_conservation_nmi.png", width = 50, height = 25, res = 300, units = "cm")
+pheatmap(nmi_matrix, 
+         cluster_rows = FALSE, 
+         cluster_cols = FALSE,
+         display_numbers = TRUE,
+         number_format = "%.2f",
+         number_color = "white",
+         breaks = breaks,
+         color = palette,
+         border_color = NA,
+         fontsize = 15,
+         main = "Normalized Mutual Information (NMI) Heatmap",
+         fontsize_row = 15,
+         fontsize_col = 15)
+dev.off()
+
+rownames(ari_matrix) <- all_cell_types
+colnames(ari_matrix) <- all_cell_types
+
+diag(ari_matrix) <- 1
+
+png("/home/acost1/BALL_project/results/networks/community_conservation_ari.png", width = 50, height = 25, res = 300, units = "cm")
+pheatmap(ari_matrix, 
+         cluster_rows = FALSE, 
+         cluster_cols = FALSE,
+         display_numbers = TRUE,
+         number_format = "%.2f",
+         number_color = "black",
+         breaks = breaks,
+         color = palette,
+         border_color = NA,
+         fontsize = 15,
+         main = "Adjusted Rand Index (ARI) Heatmap",
+         fontsize_row = 15,
+         fontsize_col = 15)
+dev.off()
+```
+
+
+Identify stable and dynamic clusters across the stages
+
+```{r}
+cluster_assignments <- lapply(communities, function(x) membership(x) ) %>% bind_cols() 
+colnames(cluster_assignments) <- all_cell_types
+rownames(cluster_assignments) <- names(membership(communities[[1]]))
+apply(cluster_assignments, 2, max) # Number of clusters/communities for each stages
+
+apply(cluster_assignments, 2, function(x){ table_stage <- table(x) 
+                                           table_stage[table_stage != 1] %>% length()
+})
+```
+
+
+
+```{r}
+table_HSC <- table(cluster_assignments$HSC)
+table_PreProB <- table(cluster_assignments$`PrePro-B`)
+
+clusters_HSC <- names(table_HSC[table_HSC > 20])
+clusters_PreProB <- names(table_PreProB[table_PreProB > 20])
+
+similar_clusters <- matrix(NA, nrow = length(clusters_HSC), ncol = length(clusters_PreProB))
+
+jaccard_similarity <- function(cluster1, cluster2) {
+  intersection <- length(intersect(cluster1, cluster2))
+  union <- length(unique(c(cluster1, cluster2)))
+  return(intersection / union)
+}
+
+
+for(i in 1: length(clusters_HSC) ){
+  for(j in 1:length(clusters_PreProB) ){
+  names_genes <- rownames(cluster_assignments)
+  
+  stages_HSC <- cluster_assignments[,"HSC"]
+  stages_PrePro <-  cluster_assignments[,"PrePro-B"]
+  
+  nodes_in_cluster1 <- names_genes[stages_HSC == clusters_HSC[i] ]
+  nodes_in_cluster2 <- names_genes[stages_PrePro == clusters_PreProB[j]  ]
+
+  similar_clusters[i, j] <- ifelse(jaccard_similarity(nodes_in_cluster1, nodes_in_cluster2) > 0.7, 1, 0)
+  }
+}
+
+which(similar_clusters == 1, arr.ind = TRUE)
+
+
+stages_HSC[stages_HSC == clusters_HSC[i] ]
+
+clusters_HSC[4] # 24
+clusters_PreProB[6] # 60
+
+
+jaccard_similarity(names(cluster_assignments$HSC[cluster_assignments$HSC == "24"]),
+                   names(cluster_assignments$`PrePro-B`[cluster_assignments$`PrePro-B` == "60"])  )
+
+
+
+stages_HSC <- cluster_assignments[,"HSC"]
+stages_PrePro <-  cluster_assignments[,"PrePro-B"]
+  
+nodes_in_cluster1 <- which(stages_HSC == 4)
+nodes_in_cluster2 <- which(stages_PrePro == 6)
+
+jaccard_similarity(nodes_in_cluster1, nodes_in_cluster2)
+
+length(clusters_HSC)
+
+length(clusters_PreProB)
+
+dim(similar_clusters)
+```
+
+
+
+```{r}
+
+
+# Initialize a list to store cumulative Jaccard scores for each stage's clusters
+n_stages <- 9
+cumulative_jaccard_scores <- vector("list", n_stages)
+
+# Loop over each stage
+for (stage in 1:n_stages) {
+  stage_clusters <- unique(cluster_assignments[[stage]])
+  stage_jaccard_scores <- matrix(0, nrow = length(stage_clusters), ncol = n_stages)
+  
+  # Loop through each cluster in the current stage
+  for (cluster_id in stage_clusters) {
+    nodes_in_current_cluster <- which(cluster_assignments[[stage]] == cluster_id)
+    
+    # Calculate Jaccard similarity across all other stages
+    jaccard_scores <- c()
+    for (compare_stage in 1:n_stages) {
+      if (compare_stage != stage) {
+        for (compare_cluster_id in unique(cluster_assignments[[compare_stage]])) {
+          nodes_in_compare_cluster <- which(cluster_assignments[[compare_stage]] == compare_cluster_id)
+          jaccard_score <- jaccard_similarity(nodes_in_current_cluster, nodes_in_compare_cluster)
+          jaccard_scores <- c(jaccard_scores, jaccard_score)
+        }
+      }
+    }
+    
+    # Store the average Jaccard similarity for this cluster across stages
+    stage_jaccard_scores[cluster_id, stage] <- mean(jaccard_scores)
+  }
+  
+  cumulative_jaccard_scores[[stage]] <- stage_jaccard_scores
+}
+
+# Display cumulative Jaccard scores for each cluster across stages
+colnames(cumulative_jaccard_scores) <- paste("Stage", 1:n_stages, sep = "_")
+rownames(cumulative_jaccard_scores) <- paste("Cluster", 1:n_clusters, sep = "_")
+print(cumulative_jaccard_scores)
+```
+
+
+
+Node participation ??
+
+```{r}
+tracked_nodes <- c("200320") # Specify nodes to track
+
+
+
+# Data structure to store community membership information
+node_communities <- list() # Will hold community memberships for each tracked node across stages
+
+# Run community detection and record node community membership
+for (stage in 1:num_stages) {
+  g <- all_networks[[stage]]
+  community <- cluster_louvain(g)
+  
+  # Record community for each tracked node
+  node_communities[[stage]] <- sapply(tracked_nodes, function(node) {
+    if (node %in% V(g)$name) {
+      V(g)$name[community$membership == membership(community)[V(g)$name == node] ]
+    } else {
+      NA  # Use NA for nodes that don’t exist in this stage
+    }
+  })
+}
+
+# Convert list to a data frame for easier analysis
+node_communities_df <- do.call(rbind, node_communities)
+colnames(node_communities_df) <- tracked_nodes
+rownames(node_communities_df) <- all_cell_types
+
+print("Community memberships of tracked nodes across stages:")
+print(node_communities_df)
+
+# 1. Calculate community stability: Check if nodes stay in the same community across stages
+node_stability <- sapply(tracked_nodes, function(node) {
+  communities <- node_communities_df[, node]
+  communities <- communities[!is.na(communities)]  # Remove NAs (if node is missing in a stage)
+  length(unique(communities)) == 1  # TRUE if node stayed in the same community across stages
+})
+
+print("Node community stability across stages (TRUE = stable, FALSE = switches):")
+print(node_stability)
+
+# 2. Count community switches for each node across stages
+node_switches <- sapply(tracked_nodes, function(node) {
+  communities <- node_communities_df[, node]
+  communities <- communities[!is.na(communities)]
+  sum(diff(communities) != 0)  # Counts the number of community switches
+})
+
+print("Number of community switches for each node:")
+print(node_switches)
+```
+
+
+
+3. Network Topology Metrics
+
+
+```{r}
+# Calculate degree distribution, density, and centrality for each network
+network_metrics <- lapply(all_networks, function(g) {
+  degree_distribution <- degree(g)
+  edge_density <- edge_density(g)
+  centralities <- betweenness(g)
+  list(degree_distribution = degree_distribution, edge_density = edge_density, centralities = centralities)
+})
+
+# Compare degree distribution across stages
+degree_distributions <- sapply(network_metrics, function(m) mean(m$degree_distribution))
+print("Average degree distribution across stages:")
+print(degree_distributions)
+
+# Compare network densities across stages = number of edges divided by the possible edges
+densities <- sapply(network_metrics, function(m) m$edge_density)
+print("Edge densities across stages:")
+print(densities)
+
+# Compare average betweenness centrality across stages
+avg_centralities <- sapply(network_metrics, function(m) mean(m$centralities))
+print("Average betweenness centrality across stages:")
+print(avg_centralities)
+```
+
+```{r}
+
+# Degree distribution = number of edges per node
+par(mfrow = c(3, 3))
+for (i in 1:num_stages) {
+  hist(network_metrics[[i]]$degree_distribution, main = paste("Degree Distribution - Stage", all_cell_types[i]),
+       xlab = "Degree", ylab = "Frequency", col = "lightblue")
+}
+
+
+barplot(sapply(network_metrics, function(x) x$edge_density), main = "Edge density")
+
+
+
+par(mfrow = c(3, 3))
+for (i in 1:num_stages) {
+  hist(network_metrics[[i]]$centralities, main = paste("Betweenness centrality - Stage", all_cell_types[i]),
+       xlab = "Degree", ylab = "Frequency", col = "lightblue")
+}
+```
+
+
+I want to identify nodes with high betweenness and closeness centrality across the differentiation
+
+By analyzing conserved or shifting centrality values, I can spot nodes that act as consistent hubs or connectors, as well as those that may take on different roles in each stage.
+
+```{r}
+betweenness_centrality <- list()
+closeness_centrality <- list()
+
+# Calculate betweenness and closeness centrality for each node in each stage
+for (stage in 1:num_stages) {
+  g <- all_networks[[stage]]
+  
+  # Compute betweenness and closeness, setting names to match node IDs
+  betweenness <- betweenness(g, normalized = TRUE)
+  closeness <- closeness(g, normalized = TRUE)
+  
+  # Store with consistent naming
+  names(betweenness) <- V(g)$name
+  names(closeness) <- V(g)$name
+  
+  # Save results in the list, ensuring all vectors have the same length
+  betweenness_centrality[[stage]] <- betweenness
+  closeness_centrality[[stage]] <- closeness
+}
+
+all_node_ids <- unique(unlist(lapply(all_networks, function(g) V(g)$name)))
+
+
+# Convert centrality lists to data frames for easier analysis
+betweenness_df <- do.call("cbind", lapply(betweenness_centrality, function(x) {
+  x[all_node_ids]  # Match to all possible node IDs
+}))
+closeness_df <- do.call("cbind", lapply(closeness_centrality, function(x) {
+  x[all_node_ids]  # Match to all possible node IDs
+}))
+
+
+high_betweenness <- rowSums(betweenness_df > 0.05)  # Counts of stages with high betweenness
+high_closeness <- rowSums(closeness_df > 0.2)  # Counts of stages with high closeness
+
+
+consistent_high_betweenness <- names(high_betweenness[high_betweenness >= num_stages / 2])
+consistent_high_betweenness <- consistent_high_betweenness[!is.na(consistent_high_betweenness)]
+consistent_high_closeness <- names(high_closeness[high_closeness >= num_stages / 2])
+consistent_high_closeness <- consistent_high_closeness[!is.na(consistent_high_closeness)]
+
+
+betweenness_changes <- apply(betweenness_matrix, 1, function(x) sum(diff(x) != 0))
+closeness_changes <- apply(closeness_matrix, 1, function(x) sum(diff(x) != 0))
+
+# Nodes with most centrality shifts
+changing_betweenness_nodes <- names(sort(betweenness_changes, decreasing = TRUE)[1:10])
+changing_closeness_nodes <- names(sort(closeness_changes, decreasing = TRUE)[1:10])
+
+print("Nodes with frequent betweenness centrality changes:")
+print(changing_betweenness_nodes)
+
+print("Nodes with frequent closeness centrality changes:")
+print(changing_closeness_nodes)
+```
+

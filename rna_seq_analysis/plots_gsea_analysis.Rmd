@@ -1,0 +1,467 @@
+---
+title: "Visualization of GSEA analysis"
+output: html_document
+date: "2024-03-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+```{r}
+# Packages
+library(dplyr)
+library(GOxploreR)
+library(rrvgo)
+
+
+library(ggplot2)
+library(viridis)
+library(reshape2)
+```
+
+
+# Heatmaps of the GO GSEA analysis done for limma differential expression analysis
+
+## Biological process terms
+```{r}
+# 1. Get results from GSEA analysis
+load("/home/acost1/BALL_project/results/gsea/gsea_results_limma_sv.rds")
+
+lapply(results_gsea, function(x){ 
+  x <- filter(x, ONTOLOGY == "BP")
+  c(x %>% nrow(), filter(x, pvalue < 0.05) %>% nrow(),  filter(x, p.adjust < 0.05) %>% nrow() )
+})
+
+
+
+# 2. Get the 20 most important BP terms from the each contrast (sorted by the p-value) 
+# Only BP
+results_BP_terms <- lapply(results_gsea[-2], function(x){ 
+  x <- filter(x, ONTOLOGY == "BP" & p.adjust < 0.05)
+  aux <- data.frame(id = x$ID, description = x$Description, enrichment_score = x$NES, pvalue = -log10(x$p.adjust))
+  aux <- aux[ order(rev(aux$pvalue), rev(aux$enrichment_score))  , ]
+  levels <- GOTermBPOnLevel(goterm = aux$id)
+  aux <- merge(aux, levels, by.x = "id", by.y = "Term", all.x = TRUE)
+  aux <- filter(aux, Level >= 4 & Level <= 10)
+  aux$id[1:20]
+ }
+)  
+results_BP_terms <- unique(Reduce(c,results_BP_terms) ) # n = 38 (1006)
+
+
+# 3. Get the enrichment score for these terms in each contrast
+results_BP <-  lapply(results_gsea, function(x) {
+              x <- filter(x, ONTOLOGY == "BP" & p.adjust < 0.05)
+              aux <- data.frame(id = x$ID, description = x$Description, enrichment_score = x$NES, pvalue = -log10(x$p.adjust))
+              aux <- aux[ order(rev(aux$pvalue), rev(aux$enrichment_score))  , ]
+              aux <- aux[aux$id %in% results_BP_terms, ]
+              dplyr::select(aux, id, description, enrichment_score) } ) %>%
+              purrr::reduce(full_join, by = c("id", "description") )
+
+names(results_BP) <- c("id", "description", names(results_gsea))
+
+
+
+# 4. Calculate the similarity matrix for these terms using REVIGO and find clusters
+simMatrix <- calculateSimMatrix(results_BP_terms,
+                                orgdb="org.Hs.eg.db",
+                                ont="BP",
+                                method="Rel")
+reducedTerms <- reduceSimMatrix(simMatrix, scores = NULL, threshold=0.7,
+                                orgdb="org.Hs.eg.db")
+
+
+results_BP <- merge(results_BP, 
+                    dplyr::select(reducedTerms, go, parentTerm),
+                    by.x = "id", by.y = "go", all.x = TRUE)
+
+colnames(results_BP) <- c("id", "description", "HSC vs PreProB", 
+                          "PreProB vs ProB", 
+                          "ProB vs PreB",
+                          "PreB vs TransB", 
+                          "TransB vs nB",
+                          "nB vs GCB", 
+                          "GCB vs memB",
+                          "GCB vs plasmaB", "cluster")
+
+results_BP <- results_BP[order(results_BP$cluster, decreasing = TRUE),]
+
+
+# 5. Plot with heatmap()
+results_BP_matrix <- as.matrix(results_BP[,colnames(results_BP) %in% c("HSC vs PreProB", 
+                          "PreProB vs ProB", 
+                          "ProB vs PreB",
+                          "PreB vs TransB", 
+                          "TransB vs nB",
+                          "nB vs GCB", 
+                          "GCB vs memB",
+                          "GCB vs plasmaB") ] )
+rownames(results_BP_matrix) <- results_BP$description
+
+
+
+
+# Plot with ggplot2()
+results_BP_matrix <- reshape2::melt(results_BP_matrix)
+results_BP_matrix <- merge(results_BP_matrix, 
+                           dplyr::select(results_BP, description, cluster),
+                           by.x = "Var1", by.y = "description", all.x = TRUE)
+
+
+ggplot(results_BP_matrix, aes(x = Var2, y = Var1, fill = value)) +
+  geom_tile() +
+  facet_grid(cluster~., scales="free", space = "free")  +
+   scale_fill_gradient2(midpoint = 0, mid="#eee8d5", high="#dc322f", low="#268bd2") + 
+  theme(strip.text.y = element_text(angle = 0)) +
+  xlab("") + ylab("") + labs(fill="Enrichment score") + ggtitle("Biological Process")
+ggsave("/home/acost1/BALL_project/results/gsea/gsea_bp2.png",
+       height = 35, width = 65, units = "cm")
+```
+
+
+
+
+## Molecular function terms
+```{r}
+lapply(results_gsea, function(x){ 
+  x <- filter(x, ONTOLOGY == "MF")
+  c(x %>% nrow(), filter(x, pvalue < 0.05) %>% nrow(),  filter(x, p.adjust < 0.05) %>% nrow() )
+})
+
+
+
+# 2. Get the 20 most important BP terms from the each contrast (sorted by the p-value) 
+# Only MF
+results_MF_terms <- lapply(results_gsea[-2], function(x){ 
+  x <- filter(x, ONTOLOGY == "MF" & p.adjust < 0.05)
+  aux <- data.frame(id = x$ID, description = x$Description, enrichment_score = x$NES, pvalue = -log10(x$p.adjust))
+  aux <- aux[ order(rev(aux$pvalue), rev(aux$enrichment_score))  , ]
+  levels <- GOTermMFOnLevel(goterm = aux$id)
+  aux <- merge(aux, levels, by.x = "id", by.y = "Term", all.x = TRUE)
+  aux <- filter(aux, Level >= 4 & Level <= 10)
+  aux$id[1:20]
+ }
+)  
+results_MF_terms <- unique(Reduce(c,results_MF_terms) ) # n = 93
+
+
+# 3. Get the enrichment score for these terms in each contrast
+results_MF <-  lapply(results_gsea, function(x) {
+              x <- filter(x, ONTOLOGY == "MF" & p.adjust < 0.05)
+              aux <- data.frame(id = x$ID, description = x$Description, enrichment_score = x$NES, pvalue = -log10(x$p.adjust))
+              aux <- aux[ order(rev(aux$pvalue), rev(aux$enrichment_score))  , ]
+              aux <- aux[aux$id %in% results_MF_terms, ]
+              dplyr::select(aux, id, description, enrichment_score) } ) %>%
+              purrr::reduce(full_join, by = c("id", "description") )
+
+names(results_MF) <- c("id", "description", names(results_gsea))
+
+
+
+# 4. Calculate the similarity matrix for these terms using REVIGO and find clusters
+simMatrix <- calculateSimMatrix(results_MF_terms,
+                                orgdb="org.Hs.eg.db",
+                                ont="MF",
+                                method="Rel")
+reducedTerms <- reduceSimMatrix(simMatrix, scores = NULL, threshold=0.7,
+                                orgdb="org.Hs.eg.db")
+
+
+results_MF <- merge(results_MF, 
+                    dplyr::select(reducedTerms, go, parentTerm),
+                    by.x = "id", by.y = "go", all.x = TRUE)
+
+colnames(results_MF) <- c("id", "description", "HSC vs PreProB", 
+                          "PreProB vs ProB", 
+                          "ProB vs PreB",
+                          "PreB vs TransB", 
+                          "TransB vs nB",
+                          "nB vs GCB", 
+                          "GCB vs memB",
+                          "GCB vs plasmaB", "cluster")
+
+results_MF <- results_MF[order(results_MF$cluster, decreasing = TRUE),]
+
+
+# 5. Plot with heatmap()
+results_MF_matrix <- as.matrix(results_MF[,colnames(results_MF) %in% c("HSC vs PreProB", 
+                          "PreProB vs ProB", 
+                          "ProB vs PreB",
+                          "PreB vs TransB", 
+                          "TransB vs nB",
+                          "nB vs GCB", 
+                          "GCB vs memB",
+                          "GCB vs plasmaB") ] )
+rownames(results_MF_matrix) <- results_MF$description
+
+
+# Plot with ggplot2()
+results_MF_matrix <- reshape2::melt(results_MF_matrix)
+results_MF_matrix <- merge(results_MF_matrix, 
+                           dplyr::select(results_MF, description, cluster),
+                           by.x = "Var1", by.y = "description", all.x = TRUE)
+
+
+ggplot(results_MF_matrix, aes(x = Var2, y = Var1, fill = value)) +
+  geom_tile() +
+  facet_grid(cluster~., scales="free", space = "free")  +
+   scale_fill_gradient2(midpoint = 0, mid="#eee8d5", high="#dc322f", low="#268bd2") + 
+  theme(strip.text.y = element_text(angle = 0)) +
+  xlab("") + ylab("") + labs(fill="Enrichment score") + ggtitle("Molecular Function")
+ggsave("/home/acost1/BALL_project/results/gsea/gsea_mf2.png",
+       height = 35, width = 68, units = "cm")
+```
+
+
+
+## Cellular component terms
+```{r}
+lapply(results_gsea, function(x){ 
+  x <- filter(x, ONTOLOGY == "CC")
+  c(x %>% nrow(), filter(x, pvalue < 0.05) %>% nrow(),  filter(x, p.adjust < 0.05) %>% nrow() )
+})
+
+
+
+# 2. Get the 20 most important BP terms from the each contrast (sorted by the p-value) 
+# Only CC
+results_CC_terms <- lapply(results_gsea[-2], function(x){ 
+  x <- filter(x, ONTOLOGY == "CC" & p.adjust < 0.05)
+  aux <- data.frame(id = x$ID, description = x$Description, enrichment_score = x$NES, pvalue = -log10(x$p.adjust))
+  aux <- aux[ order(rev(aux$pvalue), rev(aux$enrichment_score))  , ]
+  levels <- GOTermCCOnLevel(goterm = aux$id)
+  aux <- merge(aux, levels, by.x = "id", by.y = "Term", all.x = TRUE)
+  aux <- filter(aux, Level >= 4 & Level <= 10)
+  aux$id[1:20]
+ }
+)  
+results_CC_terms <- unique(Reduce(c,results_CC_terms) ) # n = 93
+
+
+# 3. Get the enrichment score for these terms in each contrast
+results_CC <-  lapply(results_gsea, function(x) {
+              x <- filter(x, ONTOLOGY == "CC" & p.adjust < 0.05)
+              aux <- data.frame(id = x$ID, description = x$Description, enrichment_score = x$NES, pvalue = -log10(x$p.adjust))
+              aux <- aux[ order(rev(aux$pvalue), rev(aux$enrichment_score))  , ]
+              aux <- aux[aux$id %in% results_CC_terms, ]
+              dplyr::select(aux, id, description, enrichment_score) } ) %>%
+              purrr::reduce(full_join, by = c("id", "description") )
+
+names(results_CC) <- c("id", "description", names(results_gsea))
+
+
+
+# 4. Calculate the similarity matrix for these terms using REVIGO and find clusters
+simMatrix <- calculateSimMatrix(results_CC_terms,
+                                orgdb="org.Hs.eg.db",
+                                ont="CC",
+                                method="Rel")
+reducedTerms <- reduceSimMatrix(simMatrix, scores = NULL, threshold=0.7,
+                                orgdb="org.Hs.eg.db")
+
+
+results_CC <- merge(results_CC, 
+                    dplyr::select(reducedTerms, go, parentTerm),
+                    by.x = "id", by.y = "go", all.x = TRUE)
+
+colnames(results_CC) <- c("id", "description", "HSC vs PreProB", 
+                          "PreProB vs ProB", 
+                          "ProB vs PreB",
+                          "PreB vs TransB", 
+                          "TransB vs nB",
+                          "nB vs GCB", 
+                          "GCB vs memB",
+                          "GCB vs plasmaB", "cluster")
+
+results_CC <- results_CC[order(results_CC$cluster, decreasing = TRUE),]
+
+
+# 5. Plot with heatmap()
+results_CC_matrix <- as.matrix(results_CC[,colnames(results_CC) %in% c("HSC vs PreProB", 
+                          "PreProB vs ProB", 
+                          "ProB vs PreB",
+                          "PreB vs TransB", 
+                          "TransB vs nB",
+                          "nB vs GCB", 
+                          "GCB vs memB",
+                          "GCB vs plasmaB") ] )
+rownames(results_CC_matrix) <- results_CC$description
+
+
+# Plot with ggplot2()
+results_CC_matrix <- reshape2::melt(results_CC_matrix)
+results_CC_matrix <- merge(results_CC_matrix, 
+                           dplyr::select(results_CC, description, cluster),
+                           by.x = "Var1", by.y = "description", all.x = TRUE)
+
+
+ggplot(results_CC_matrix, aes(x = Var2, y = Var1, fill = value)) +
+  geom_tile() +
+  facet_grid(cluster~., scales="free", space = "free")  +
+   scale_fill_gradient2(midpoint = 0, mid="#eee8d5", high="#dc322f", low="#268bd2") + 
+  theme(strip.text.y = element_text(angle = 0)) +
+  xlab("") + ylab("") + labs(fill="Enrichment score") + ggtitle("Cellular Component")
+ggsave("/home/acost1/BALL_project/results/gsea/gsea_CC2.png",
+       height = 35, width = 65, units = "cm")
+```
+
+
+```{r}
+load("/home/acost1/BALL_project/results/limma/limma_results_sv.rds")
+
+# Only BP
+gene_list <- lapply(results, function(x){ 
+  x <- dplyr::filter(x, log2FoldChange > 3, padj < 0.01)
+  x <- getBM(filters= "ensembl_gene_id", attributes= c("ensembl_gene_id","hgnc_symbol"),
+                              values = rownames(x), mart= mart)
+  x$hgnc_symbol[x$hgnc_symbol != ""]
+ }
+)
+
+gmtlist2file(gene_list, file = "/home/acost1/BALL_project/results/gsea/gmt_file.gmt")
+
+gene_lists <- loadGeneLists("/home/acost1/BALL_project/results/gsea/gmt_file.gmt" )
+
+go_terms_mouse <- loadGOTerms( species = "human", domain = "BP", min_num_genes = 10, use_archived = FALSE )
+
+
+enrichment_matrix <- performGOEnrichment(gene_list, go_terms_mouse)
+
+levels <- GOTermBPOnLevel(goterm = rownames(enrichment_matrix) )
+levels <- dplyr::rename(levels, id = Term)
+enrichment_matrix <- enrichment_matrix[levels$Level >= 4 & levels$Level <= 10,] 
+  
+  
+
+hclust_results <- performHierarchicalClustering(enrichment_matrix, distance_method = "euclidean", clustering_method = "complete" )
+hclust_results
+
+clusters <- groupClusters(hclust_results, distance_threshold = 5)
+
+cluster_labels <- annotateClusters( clusters )
+
+
+png( "/home/acost1/BALL_project/results/gsea/heatmap.png", width = 1600, height = 1200 )
+plotHeatmap( enrichment_matrix, hclust_results, clusters, cluster_labels, 
+             dendrogram_lwd = 1,
+             cluster_label_width = 0.5)
+dev.off()
+
+
+results_BP <-  lapply(results_BP, function(x) dplyr::select(x, id, description, enrichment_score)) %>%
+              purrr::reduce(full_join, by = c("id", "description") ) 
+
+names(results_BP) <- c("id", "description", names(results_gsea))
+
+rownames(results_BP) <- results_BP$id
+results_BP_matrix <- as.matrix(results_BP[,-c(1,2)])
+results_BP_matrix[is.na(results_BP_matrix)] <- 0
+hclust_results <- performHierarchicalClustering( results_BP_matrix, distance_method = "euclidean", clustering_method = "complete")
+hclust_results
+
+clusters <- groupClusters( hclust_results, distance_threshold = 5)
+lapply( head( clusters ), head )
+
+length( clusters )
+
+
+cluster_labels <- annotateClusters( clusters )
+head( cluster_labels )
+
+
+plotHeatmap( results_BP_matrix, hclust_results, clusters, cluster_labels,  min_num_terms = 5 )
+
+
+
+
+# Only CC
+
+# Only MF
+tail(results_gsea$go_prepro)
+```
+
+
+
+# Plots of the GSEA with another package: goSTAG (not good - do not run)
+```{r eval=FALSE, include=FALSE}
+load("/home/acost1/BALL_project/results/gsea/gsea_results_limma_sv2.rds")
+
+# Only BP
+results_BP <- lapply(results_gsea, function(x){ 
+  x <- filter(x, ONTOLOGY == "BP")
+  aux <- data.frame(id = x$ID, description = x$Description, enrichment_score = x$NES, pvalue = -log10(x$p.adjust))
+  aux <- aux[ order(rev(aux$pvalue), rev(aux$enrichment_score))  , ]
+  levels <- GOTermBPOnLevel(goterm = aux$id)
+  levels <- dplyr::rename(levels, id = Term)
+  aux <- merge(aux, levels, by = "id", all.x = TRUE)
+  aux <- filter(aux, Level >= 4 & Level <= 10)
+  aux
+ }
+)
+
+
+
+
+results_BP <-  lapply(results_BP, function(x) dplyr::select(x, id, description, pvalue)) %>%
+              purrr::reduce(full_join, by = c("id", "description") ) 
+
+names(results_BP) <- c("id", "description", names(results_gsea))
+
+rownames(results_BP) <- results_BP$id
+results_BP_matrix <- as.matrix(results_BP[,-c(1,2)])
+results_BP_matrix[is.na(results_BP_matrix)] <- 0
+hclust_results <- performHierarchicalClustering( results_BP_matrix, distance_method = "euclidean", clustering_method = "complete")
+hclust_results
+
+clusters <- groupClusters( hclust_results, distance_threshold = 5)
+lapply( head( clusters ), head )
+
+length( clusters )
+
+
+cluster_labels <- annotateClusters( clusters )
+head( cluster_labels )
+
+
+plotHeatmap( results_BP_matrix, hclust_results, clusters, cluster_labels,  min_num_terms = 5 )
+
+
+
+
+# Only CC
+
+# Only MF
+tail(results_gsea$go_prepro)
+```
+
+
+
+
+# "Pintao" plot of the enrichment terms (Redo this with the new 3 terms)
+
+```{r}
+load("/home/acost1/BALL_project/results/gsea/results_pintao_plot2.rds")
+
+
+results_plot <- results_matrix
+results_plot$value_c <- ifelse(results_plot$value > 0, 1, 0)
+
+p <- 
+  results_plot[nrow(results_plot):1,] %>%
+  ggplot(aes(y = Var1, x = Var2)) +
+  geom_tile(aes(fill = factor(value_c)),
+             color = "white",lwd = 0.2)  + 
+  scale_y_discrete(limits = rownames(results_df)[75:1]) +
+  scale_fill_manual(values=c("white", "black")) + 
+  theme_classic() + 
+  xlab("") + ylab("") + 
+  theme(legend.position="none")
+  
+p
+ggsave("/home/acost1/BALL_project/results/gsea/pintao_plot.png", height = 30, width = 50, units = "cm" )
+```
+
+
+

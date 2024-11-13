@@ -1,0 +1,834 @@
+---
+title: "Longitudinal analysis - RNA expression"
+author: "Anna Costa-Garrido"
+date: "2024-05-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+
+```{r}
+# Packages
+library(dplyr)
+library(biomaRt)
+library(tibble)
+library(tidyr)
+library(ggplot2)
+
+# library(kmlShape)
+library(kml)
+# library(TMixClust)
+
+library(GOxploreR)
+library(rrvgo)
+```
+
+
+# Identify clusters of genes according to the temporal evolution (differentiation process) of their expression
+
+## Exploratory: using hierarchical clustering
+
+- With protein coding genes that are differentially expressed across the B-cell development
+N = 12.576 genes
+```{r}
+load("/home/acost1/BALL_project/results/limma/limma_results_sv.rds")
+
+selected_genes <- unique(c(
+results$prepro %>% filter(padj < 0.01) %>% rownames(),
+results$proB %>% filter(padj < 0.01) %>% rownames(),
+results$preB %>% filter(padj < 0.01) %>% rownames(),
+results$transB %>% filter(padj < 0.01) %>% rownames(),
+results$nB %>% filter(padj < 0.01) %>% rownames(),
+results$gcb %>% filter(padj < 0.01) %>% rownames(),
+results$memB %>% filter(padj < 0.01) %>% rownames(),
+results$plasma %>% filter(padj < 0.01) %>% rownames() ) ) 
+
+# 17.743
+```
+
+
+
+
+```{r}
+mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
+genes <- biomaRt::getBM(filters= "ensembl_gene_id",
+                          attributes = c("ensembl_gene_id", "transcript_biotype"), 
+                          values = selected_genes, 
+                          mart = mart)
+  
+genes$protein_coding_c <- ifelse(genes$transcript_biotype == "protein_coding", 1, 0)
+genes <- genes %>% dplyr::select(ensembl_gene_id, protein_coding_c) %>%
+                   group_by(ensembl_gene_id) %>%
+                   summarise(protein_coding_c = sum(protein_coding_c)) %>%
+                   filter(protein_coding_c == 1)
+
+selected_genes <- selected_genes[selected_genes %in% genes$ensembl_gene_id]
+# 12.576 genes
+```
+
+```{r}
+load("/home/acost1/BALL_project/data/RNA/counts_rlog_normalized.rds")
+
+NormByRlog_selected <- NormByRlog[selected_genes, !sub("\\_.*", "", colnames(NormByRlog)) %in%
+                                    c("CMP", "Mon", "nCD8")] 
+rm(NormByRlog)
+```
+
+
+```{r}
+# Euclidean distance
+dist <- dist(NormByRlog_selected, diag=TRUE)
+
+# Hierarchical Clustering with hclust
+hc <- hclust(dist)
+
+# Plot the result
+plot(hc)
+abline(h = 20, col = "brown", lwd = 2)
+
+
+gene_cluster <- cutree(hc, k = 50) %>% 
+  # turn the named vector into a tibble
+  enframe() %>% 
+  # rename some of the columns
+  rename(gene = name, cluster = value)
+
+
+counts_long <- NormByRlog_selected %>%
+               as.data.frame() %>%
+               mutate(gene = rownames(NormByRlog_selected) )%>%
+               pivot_longer(!gene,names_to = "cell_type", values_to = "count")
+counts_long$group_cell_type <- sub("\\_.*", "", counts_long$cell_type)
+counts_long <- group_by(counts_long,gene, group_cell_type) %>%
+               summarise(avg_counts = mean(count)) %>%
+               filter(!group_cell_type %in% c("CMP", "Mon", "nCD8")) 
+
+counts_cluster <- counts_long %>% 
+                  inner_join(gene_cluster, by = "gene")
+
+counts_cluster$group_cell_type <- factor(counts_cluster$group_cell_type,
+                                         levels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"),
+                                         labels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"))
+
+counts_cluster %>% 
+  ggplot(aes(group_cell_type, avg_counts)) +
+  geom_line(aes(group = gene)) +
+  geom_line(stat = "summary", fun = "median", colour = "brown", size = 1.5, 
+            aes(group = 1)) +
+  facet_wrap( ~ cluster, ncol = 6)
+ggsave("/home/acost1/BALL_project/results/longitudinal/clusters.png", width = 50, height = 100, units = "cm")
+```
+
+
+
+```{r}
+library("pheatmap")
+pheatmap(NormByRlog_selected, cutree_rows = 13,
+          scale = 'row')
+```
+
+
+
+## KMLshape
+
+```{r}
+traj <- rename(counts_long, id = gene, times = group_cell_type, traj = avg_counts)
+traj <- traj[order(traj$id, traj$times), ]
+traj$id <- as.integer(traj$id)
+traj$times <- as.integer(traj$times)
+
+myClds <- cldsLong(as.data.frame(traj))
+plot(myClds)
+
+
+kml <- kmlShape(myClds, nbClusters = 50, timeScale = 0.1, FrechetSumOrMax = "max", 
+         toPlot="both", parAlgo=parKmlShape())
+```
+
+
+## KmL
+
+```{r}
+counts_long$group_cell_type <- factor(counts_long$group_cell_type,
+                                         levels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"),
+                                         labels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"))
+
+
+counts_long <- arrange(counts_long, gene, group_cell_type)
+
+# Pivot long to wide 
+counts_wide <- pivot_wider(counts_long,
+                           id_cols = "gene", 
+                           values_from = "avg_counts",
+                           names_from = "group_cell_type")
+counts_wide <- as.data.frame(counts_wide)
+rownames(counts_wide) <- counts_wide$gene
+counts_wide <- counts_wide[,-1]
+
+
+counts_cluster <- clusterLongData(traj=counts_wide,idAll=rownames(counts_wide))
+
+clusters <- kml(counts_cluster,nbClusters=10:20, nbRedrawing=20, toPlot="criterion", 
+                parAlgo=parALGO() )
+    
+### Mean without individual
+
+png("/home/acost1/BALL_project/results/longitudinal/plot_trajectories13.png", 
+    height = 22, width = 40, units = "cm", res = 300)
+plot(counts_cluster, 13,  parTraj=parTRAJ(type="n"))
+dev.off()
+
+png("/home/acost1/BALL_project/results/longitudinal/plot_trajectories20.png", 
+    height = 22, width = 40, units = "cm", res = 300)
+plot(counts_cluster, 20,  parTraj=parTRAJ(type="n"))
+dev.off()
+
+
+
+plot(counts_cluster, 13, parMean=parMEAN(type="l"))
+### Only one letter on the mean trajectories
+plot(counts_cluster, 13, parMean=parMEAN(pchPeriod=Inf))
+### Color individual according to its clusters (col="clusters")
+plot(counts_cluster, 13, parTraj=parTRAJ(col="clusters"))
+
+
+
+
+plot(counts_cluster, 20, parTraj=parTRAJ(col="clusters"),parMean=parMEAN(type="n"))
+### Only few trajectories
+plot(counts_cluster, 20, nbSample=1,parTraj=parTRAJ(col='clusters'),parMean=parMEAN(type="n"))
+
+
+plotTraj(counts_cluster,20)
+```
+
+
+```{r}
+genes_cluster13 <- data.frame(gene = rownames(counts_wide), cluster = getClusters(counts_cluster,13) )
+genes_cluster20 <- data.frame(gene = rownames(counts_wide), cluster = getClusters(counts_cluster,20) )
+                              
+counts_long %>% inner_join(genes_cluster13, by = "gene") %>%
+  ggplot(aes(group_cell_type, avg_counts)) +
+  geom_line(aes(group = gene)) +
+  geom_line(stat = "summary", fun = "mean", colour = "brown", size = 1.5, 
+            aes(group = 1)) +
+  facet_wrap( ~ cluster, ncol = 6) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+ggsave("/home/acost1/BALL_project/results/longitudinal/ggplot_trajectories13.png",
+       height = 22, width = 50, units = "cm") 
+
+                             
+counts_long %>% inner_join(genes_cluster20, by = "gene") %>%
+  ggplot(aes(group_cell_type, avg_counts)) +
+  geom_line(aes(group = gene)) +
+  geom_line(stat = "summary", fun = "mean", colour = "brown", size = 1.5, 
+            aes(group = 1)) +
+  facet_wrap( ~ cluster, ncol = 6) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+ggsave("/home/acost1/BALL_project/results/longitudinal/ggplot_trajectories20.png",
+       height = 22, width = 50, units = "cm")
+
+```
+
+
+
+Heatmap to show the rna expression of the genes along the stages
+
+```{r}
+load("/home/acost1/BALL_project/results/longitudinal/kml_results.rds") 
+genes_cluster13 <- data.frame(gene = rownames(counts_wide), cluster = getClusters(counts_cluster,13) )
+
+
+example_genes <- genes_cluster13 %>% group_by(cluster) %>% slice(1:5)
+
+NormByRlog_selected2 <- NormByRlog_selected[example_genes$gene, ]
+
+counts_long_selected <- NormByRlog_selected2 %>%
+               as.data.frame() %>%
+               mutate(gene = rownames(NormByRlog_selected2) )%>%
+               pivot_longer(!gene,names_to = "cell_type", values_to = "count")
+counts_long_selected$group_cell_type <- sub("\\_.*", "", counts_long_selected$cell_type)
+
+counts_long_selected <- merge(counts_long_selected, genes_cluster13, by = "gene", all.x = TRUE)
+
+samples_ordered <- c("HSC_fetal_1", "HSC_fetal_2", "HSC_fetal_3",
+                     "PreProB_fetal_1", "PreProB_fetal_2", "PreProB_fetal_3",
+                     "ProB_fetal_1", "ProB_fetal_2", "ProB_fetal_3",
+                     "PreB_fetal_1", "PreB_fetal_2", "PreB_fetal_3",
+                     "immtransB_fetal_1", "immtransB_fetal_2", "immtransB_fetal_3",
+                     "nB_WT_1", "nB_WT_2", "nB_WT_3",
+                     "GCB_tonsil_1", "GCB_tonsil_3", "GCB_tonsil_4", "GCB_tonsil_5",
+                     "memB_WT_1", "memB_WT_2", "memB_WT_3", "memB_WT_4", 
+                     "PC_WT_1", "PC_WT_2", "PC_WT_3" )
+
+
+# Heatmap 
+counts_long_selected$cell_type <- factor(counts_long_selected$cell_type,
+                                               levels = samples_ordered,
+                                               labels = samples_ordered)
+counts_long_selected$group_cell_type <- factor(counts_long_selected$group_cell_type,
+                                               levels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"),
+                                               labels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"))
+
+
+counts_long_selected %>% 
+  ggplot(aes(cell_type, count, colour = gene)) +
+  geom_line(aes(group = gene)) +
+  facet_wrap( ~ cluster, ncol = 6) + 
+  theme(legend.position = "none") + 
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+
+
+ggplot(counts_long_selected, aes(x = cell_type, y = gene, fill = count)) +
+  geom_tile() +
+  facet_grid(cluster~., scales="free", space = "free")  +
+   scale_fill_gradient2(mid="#eee8d5", high="#dc322f", low="#268bd2") + 
+  theme(strip.text.y = element_text(angle = 0)) +
+  xlab("") + ylab("")
+```
+
+
+
+Enrichment analysis - ORA of each cluster (GO and ReactomePA)
+
+```{r}
+load("/home/acost1/BALL_project/results/longitudinal/kml_results.rds")
+
+counts_cluster
+
+genes_cluster13 <- data.frame(gene = rownames(counts_wide), cluster = getClusters(counts_cluster,13) )
+
+
+
+enrichment_clusters <- apply(data.frame(names(table(genes_cluster13$cluster))), 1 , function(x){ 
+enrichGO(gene = genes_cluster13$gene[genes_cluster13$cluster == x],
+                   universe = genes_cluster13$gene,
+                   ont ="ALL", 
+                   keyType = "ENSEMBL", 
+                   readable = T, 
+                   pvalueCutoff = 1, 
+                   OrgDb = org.Hs.eg.db, 
+                   pAdjustMethod = "fdr") %>% as.data.frame() } )
+clusterA %>% as.data.frame()
+```
+
+
+```{r}
+lapply(enrichment_clusters, function(x){ 
+  x <- filter(x, ONTOLOGY == "BP")
+  c(x %>% nrow(), filter(x, pvalue < 0.05) %>% nrow(),  filter(x, p.adjust < 0.05) %>% nrow() )
+})
+
+
+
+# 2. Get the 20 most important BP terms from the each contrast (sorted by the p-value) 
+# Only BP
+results_BP_terms <- lapply(enrichment_clusters[-5], function(x){ 
+  x <- filter(x, ONTOLOGY == "BP" & p.adjust < 0.05)
+  aux <- data.frame(id = x$ID, description = x$Description, pvalue = -log10(x$p.adjust))
+  aux <- aux[ order(rev(aux$pvalue))  , ]
+  levels <- GOTermBPOnLevel(goterm = aux$id)
+  aux <- merge(aux, levels, by.x = "id", by.y = "Term", all.x = TRUE)
+  aux <- filter(aux, Level >= 4 & Level <= 10)
+  aux$id[1:20]
+ }
+)  
+results_BP_terms <- unique(Reduce(c,results_BP_terms) ) # n = 38 (1006)
+
+
+names(enrichment_clusters) <- paste0("cluster", 1:13)
+
+# 3. Get the enrichment score for these terms in each contrast
+results_BP <-  lapply(enrichment_clusters, function(x) {
+              x <- filter(x, ONTOLOGY == "BP" & p.adjust < 0.05)
+              aux <- data.frame(id = x$ID, description = x$Description,  pvalue = -log10(x$p.adjust))
+              aux <- aux[ order(rev(aux$pvalue))  , ]
+              aux <- aux[aux$id %in% results_BP_terms, ]
+              dplyr::select(aux, id, description, pvalue) } ) %>%
+              purrr::reduce(full_join, by = c("id", "description") )
+
+names(results_BP) <- c("id", "description", names(enrichment_clusters))
+
+
+
+# 4. Calculate the similarity matrix for these terms using REVIGO and find clusters
+simMatrix <- calculateSimMatrix(results_BP_terms,
+                                orgdb="org.Hs.eg.db",
+                                ont="BP",
+                                method="Rel")
+reducedTerms <- reduceSimMatrix(simMatrix, scores = NULL, threshold=0.7,
+                                orgdb="org.Hs.eg.db")
+
+
+results_BP <- merge(results_BP, 
+                    dplyr::select(reducedTerms, go, parentTerm),
+                    by.x = "id", by.y = "go", all.x = TRUE)
+
+colnames(results_BP) <- c("id", "description", names(enrichment_clusters), "cluster")
+
+results_BP <- results_BP[order(results_BP$cluster, decreasing = TRUE),]
+
+
+# 5. Plot with heatmap()
+results_BP_matrix <- as.matrix(results_BP[,colnames(results_BP) %in% names(enrichment_clusters) ] )
+rownames(results_BP_matrix) <- results_BP$description
+
+
+
+
+# Plot with ggplot2()
+results_BP_matrix <- reshape2::melt(results_BP_matrix)
+results_BP_matrix <- merge(results_BP_matrix, 
+                           dplyr::select(results_BP, description, cluster),
+                           by.x = "Var1", by.y = "description", all.x = TRUE)
+
+
+ggplot(results_BP_matrix, aes(x = Var2, y = Var1, fill = value)) +
+  geom_tile() +
+  facet_grid(cluster~., scales="free", space = "free")  +
+   scale_fill_gradient2(midpoint = 0, mid="#eee8d5", high="#dc322f", low="#268bd2") + 
+  theme(strip.text.y = element_text(angle = 0)) +
+  xlab("") + ylab("") + labs(fill="Enrichment score") + ggtitle("Biological Process")
+```
+
+
+```{r}
+pathways_clusters <- apply(data.frame(names(table(genes_cluster13$cluster))), 1 , function(x){ 
+enrichPathway(gene = getBM(filters= "ensembl_gene_id", attributes= c("ensembl_gene_id",
+                                                "entrezgene_id"),values=genes_cluster13$gene[genes_cluster13$cluster == x],mart= mart)$entrezgene_id,
+                  pvalueCutoff = 1, readable=TRUE
+              ) %>% as.data.frame() } )
+clusterA %>% as.data.frame()
+
+
+
+lapply(pathways_clusters, function(x) filter(x, p.adjust < 0.01) )
+```
+
+
+## TMixClust
+
+```{r}
+plot_time_series_df(counts_wide[1:500,])
+
+cluster_obj = TMixClust(counts_wide[1:100,], nb_clusters = 30)
+
+
+for (i in 1:10) {
+  # extract the time series in the current cluster and plot them
+  c_df=counts_wide[which(cluster_obj$em_cluster_assignment==i),]
+  plot_time_series_df(c_df, plot_title = paste("cluster",i))
+}
+
+
+plot_silhouette(cluster_obj)
+
+
+
+# Other methods
+  # - BClustLonG
+  # - mfuzz
+
+```
+
+
+
+
+# Clustering with mclust
+
+```{r}
+library(mclust)
+```
+
+
+Clustering on the scaled and normalized counts by rlog
+```{r}
+mod1 <- Mclust(t(scale(t(NormByRlog_selected))), modelNames = "EII")
+summary(mod1)
+table(mod1$classification)
+
+
+genes_cluster9 <- data.frame(gene = rownames(NormByRlog_selected), cluster = mod1$classification )
+  
+
+counts_long <- t(scale(t(NormByRlog_selected))) %>%
+               as.data.frame() %>%
+               mutate(gene = rownames(NormByRlog_selected) )%>%
+               pivot_longer(!gene,names_to = "cell_type", values_to = "count")
+counts_long$group_cell_type <- sub("\\_.*", "", counts_long$cell_type)
+counts_long <- group_by(counts_long,gene, group_cell_type) %>%
+               filter(!group_cell_type %in% c("CMP", "Mon", "nCD8")) 
+
+
+counts_long_selected <- counts_long %>% inner_join(genes_cluster9, by = "gene")
+
+
+counts_long_selected$cell_type <- factor(counts_long_selected$cell_type,
+                                         levels = colnames(NormByRlog_selected),
+                                         labels = colnames(NormByRlog_selected))
+
+ggplot( counts_long_selected , aes(x = cell_type, y = gene, fill = count)) +
+  geom_tile() +
+  facet_grid(cluster~., scales="free", space = "free")  +
+  scale_fill_gradient2(mid="#eee8d5", high="#dc322f", low="#268bd2") + 
+  theme(strip.text.y = element_text(angle = 0),
+        axis.text.x = element_text(angle = 45, hjust=1)) +
+  xlab("") + ylab("")
+
+
+counts_long_selected %>%
+  ggplot(aes(cell_type, count)) +
+  geom_line(aes(group = gene)) +
+  geom_line(stat = "summary", fun = "mean", colour = "brown", size = 1.5, 
+            aes(group = 1)) +
+  facet_wrap( ~ cluster, ncol = 6) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+```
+
+
+Clustering on the normalized counts by Median of ratio's - DESeq2
+
+```{r}
+load("/home/acost1/BALL_project/results/limma/limma_results_sv.rds")
+
+
+# Selected genes from DE analysis of limma with SV
+selected_genes <- unique(c(
+results$prepro %>% filter(padj < 0.01 & abs(log2FoldChange) >= 3) %>% rownames(),
+results$proB %>% filter(padj < 0.01 & abs(log2FoldChange) >= 3) %>% rownames(),
+results$preB %>% filter(padj < 0.01 & abs(log2FoldChange) >= 3) %>% rownames(),
+results$transB %>% filter(padj < 0.01 & abs(log2FoldChange) >= 3) %>% rownames(),
+results$nB %>% filter(padj < 0.01 & abs(log2FoldChange) >= 3) %>% rownames(),
+results$gcb %>% filter(padj < 0.01 & abs(log2FoldChange) >= 3) %>% rownames(),
+results$memB %>% filter(padj < 0.01 & abs(log2FoldChange) >= 3) %>% rownames(),
+results$plasma %>% filter(padj < 0.01 & abs(log2FoldChange) >= 3) %>% rownames() ) )  
+# N = 9,229
+
+
+# Select protein-coding genes
+mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
+genes <- biomaRt::getBM(filters= "ensembl_gene_id",
+                          attributes = c("ensembl_gene_id", "transcript_biotype"), 
+                          values = selected_genes, 
+                          mart = mart)
+  
+genes$protein_coding_c <- ifelse(genes$transcript_biotype == "protein_coding", 1, 0)
+genes <- genes %>% dplyr::select(ensembl_gene_id, protein_coding_c) %>%
+                   group_by(ensembl_gene_id) %>%
+                   summarise(protein_coding_c = sum(protein_coding_c)) %>%
+                   filter(protein_coding_c == 1)
+
+selected_genes <- selected_genes[selected_genes %in% genes$ensembl_gene_id]
+# 5,316 genes
+
+
+
+load("/home/acost1/BALL_project/data/RNA/counts_deseq2_normalized.rds")
+
+normalized_selected <- normalized_counts[selected_genes,] 
+rm(normalized_counts)
+
+
+# Clustering with mclust
+mod1 <- Mclust(t(scale(t(normalized_selected))), modelNames = "EII")
+summary(mod1)
+table(mod1$classification)
+
+
+genes_cluster4 <- data.frame(gene = rownames(normalized_selected), cluster = mod1$classification )
+  
+
+counts_long <- t(scale(t(normalized_selected))) %>%
+               as.data.frame() %>%
+               mutate(gene = rownames(normalized_selected) )%>%
+               pivot_longer(!gene,names_to = "cell_type", values_to = "count")
+counts_long$group_cell_type <- sub("\\_.*", "", counts_long$cell_type)
+counts_long <- group_by(counts_long,gene, group_cell_type) %>%
+               filter(!group_cell_type %in% c("CMP", "Mon", "nCD8")) 
+
+
+counts_long_selected <- counts_long %>% inner_join(genes_cluster4, by = "gene")
+
+
+counts_long_selected$cell_type <- factor(counts_long_selected$cell_type,
+                                         levels = colnames(normalized_selected),
+                                         labels = colnames(normalized_selected))
+
+ggplot( counts_long_selected , aes(x = cell_type, y = gene, fill = count)) +
+  geom_tile() +
+  facet_grid(cluster~., scales="free", space = "free")  +
+  scale_fill_gradient2(mid="#eee8d5", high="#dc322f", low="#268bd2") + 
+  theme(strip.text.y = element_text(angle = 0),
+        axis.text.x = element_text(angle = 45, hjust=1)) +
+  xlab("") + ylab("")
+
+
+counts_long_selected %>%
+  ggplot(aes(cell_type, count)) +
+  geom_line(aes(group = gene)) +
+  geom_line(stat = "summary", fun = "mean", colour = "brown", size = 1.5, 
+            aes(group = 1)) +
+  facet_wrap( ~ cluster, ncol = 6) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+
+
+save(mod1, file = "/home/acost1/BALL_project/results/predict_expression/group_mclust.rds")
+```
+
+Enrichment analysis
+
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+```
+
+
+```{r}
+enrichment_clusters <- apply(data.frame(names(table(genes_cluster4$cluster))), 1 , function(x){ 
+                  enrichGO(gene = genes_cluster4$gene[genes_cluster4$cluster == x],
+                   universe = genes_cluster4$gene,
+                   ont ="ALL", 
+                   keyType = "ENSEMBL", 
+                   readable = T, 
+                   pvalueCutoff = 1, 
+                   OrgDb = org.Hs.eg.db, 
+                   pAdjustMethod = "fdr") %>% as.data.frame() } )
+```
+
+
+
+```{r}
+lapply(enrichment_clusters, function(x){ 
+  x <- filter(x, ONTOLOGY == "BP")
+  c(x %>% nrow(), filter(x, pvalue < 0.05) %>% nrow(),  filter(x, p.adjust < 0.05) %>% nrow() )
+})
+
+
+
+# 2. Get the 20 most important BP terms from the each contrast (sorted by the p-value) 
+# Only BP
+results_BP_terms <- lapply(enrichment_clusters[-c(5,6,9)], function(x){ 
+  x <- filter(x, ONTOLOGY == "BP" & p.adjust < 0.05)
+  aux <- data.frame(id = x$ID, description = x$Description, pvalue = -log10(x$p.adjust))
+  aux <- aux[ order(rev(aux$pvalue))  , ]
+  levels <- GOTermBPOnLevel(goterm = aux$id)
+  aux <- merge(aux, levels, by.x = "id", by.y = "Term", all.x = TRUE)
+  aux <- filter(aux, Level >= 4 & Level <= 10)
+  aux$id[1:20]
+ }
+)  
+results_BP_terms <- unique(Reduce(c,results_BP_terms) ) # n = 38 (1006)
+
+
+names(enrichment_clusters) <- paste0("cluster", 1:9)
+
+# 3. Get the enrichment score for these terms in each contrast
+results_BP <-  lapply(enrichment_clusters[-c(5,6,9)], function(x) {
+              x <- filter(x, ONTOLOGY == "BP" & p.adjust < 0.05)
+              aux <- data.frame(id = x$ID, description = x$Description,  pvalue = -log10(x$p.adjust))
+              aux <- aux[ order(rev(aux$pvalue))  , ]
+              aux <- aux[aux$id %in% results_BP_terms, ]
+              dplyr::select(aux, id, description, pvalue) } ) %>%
+              purrr::reduce(full_join, by = c("id", "description") )
+
+names(results_BP) <- c("id", "description", names(enrichment_clusters)[-c(5,6,9)])
+
+
+
+# 4. Calculate the similarity matrix for these terms using REVIGO and find clusters
+simMatrix <- calculateSimMatrix(results_BP_terms,
+                                orgdb="org.Hs.eg.db",
+                                ont="BP",
+                                method="Rel")
+reducedTerms <- reduceSimMatrix(simMatrix, scores = NULL, threshold=0.7,
+                                orgdb="org.Hs.eg.db")
+
+
+results_BP <- merge(results_BP, 
+                    dplyr::select(reducedTerms, go, parentTerm),
+                    by.x = "id", by.y = "go", all.x = TRUE)
+
+colnames(results_BP) <- c("id", "description", names(enrichment_clusters)[-c(5,6,9)], "cluster")
+
+results_BP <- results_BP[order(results_BP$cluster, decreasing = TRUE),]
+
+
+# 5. Plot with heatmap()
+results_BP_matrix <- as.matrix(results_BP[,colnames(results_BP) %in% names(enrichment_clusters)[-c(5,6,9)] ] )
+rownames(results_BP_matrix) <- results_BP$description
+
+
+
+
+# Plot with ggplot2()
+results_BP_matrix <- reshape2::melt(results_BP_matrix)
+results_BP_matrix <- merge(results_BP_matrix, 
+                           dplyr::select(results_BP, description, cluster),
+                           by.x = "Var1", by.y = "description", all.x = TRUE)
+
+
+ggplot(results_BP_matrix, aes(x = Var2, y = Var1, fill = value)) +
+  geom_tile() +
+  facet_grid(cluster~., scales="free", space = "free")  +
+   scale_fill_gradient2(midpoint = 0, mid="#eee8d5", high="#dc322f", low="#268bd2") + 
+  theme(strip.text.y = element_text(angle = 0)) +
+  xlab("") + ylab("") + labs(fill="Enrichment score") + ggtitle("Biological Process")
+ggsave("/home/acost1/BALL_project/results/gsea/gsea_bp_clusters.png",
+       height = 35, width = 65, units = "cm")
+```
+
+
+
+```{r}
+pathways_clusters <- apply(data.frame(names(table(genes_cluster4$cluster))), 1 , function(x){ 
+                            enrichPathway(gene = getBM(filters= "ensembl_gene_id", 
+                                                   attributes= c("ensembl_gene_id", "entrezgene_id"),
+                                                   values = genes_cluster4$gene[genes_cluster4$cluster == x], 
+                                                   mart= mart)$entrezgene_id,
+                                      pvalueCutoff = 1, readable=TRUE) %>% as.data.frame() } )
+
+lapply(pathways_clusters, function(x) filter(x, p.adjust < 0.01) )
+```
+
+
+# Clustering of the genes depending on the results obtained with Limma - SV
+
+```{r}
+load("/home/acost1/BALL_project/results/limma/limma_results_sv.rds")
+
+counter <- 0 
+contrast <- names(results[-1])
+results_limma_sv <- lapply(results[-1], function(x) {
+                    counter <<- counter + 1
+                    x <- x[order(rownames(x)), ]
+                    x$cell_type <- "constant"
+                    x$cell_type[x$padj < 0.01 & x$log2FoldChange > 3] <- "up"
+                    x$cell_type[x$padj < 0.01 & x$log2FoldChange < -3] <- "down"
+                    x <- dplyr::select(x, cell_type) %>%
+                           mutate(gene_id = rownames(x)) 
+                    colnames(x)[1] <- contrast[counter]
+                    x
+                    } 
+                    ) %>% purrr::reduce( full_join, by = "gene_id")
+results_limma_sv[is.na(results_limma_sv)] <- "constant"
+```
+
+
+
+```{r}
+results_limma_sv <- data.frame(
+  gene_id = results_limma_sv$gene_id,
+  group = apply(results_limma_sv, 1, function(x) paste0(x[-2], collapse = "-") ) )
+
+
+table(results_limma_sv$group) %>% length() # n = 426 groups 
+
+sort(table(results_limma_sv$group), decreasing = TRUE)[1:30] %>% as.data.frame()
+
+
+# Most common
+most_common <- table(results_limma_sv$group) %>% sort(decreasing = TRUE) %>% head(n = 30) %>% names()
+results_limma_sv_common <- results_limma_sv[results_limma_sv$group %in% most_common,]
+# n genes = 20.204
+
+
+
+# Get the expression
+selected_genes <- results_limma_sv_common$gene_id
+
+mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
+genes <- biomaRt::getBM(filters= "ensembl_gene_id",
+                          attributes = c("ensembl_gene_id", "transcript_biotype"), 
+                          values = selected_genes, 
+                          mart = mart)
+  
+genes$protein_coding_c <- ifelse(genes$transcript_biotype == "protein_coding", 1, 0)
+genes <- genes %>% dplyr::select(ensembl_gene_id, protein_coding_c) %>%
+                   group_by(ensembl_gene_id) %>%
+                   summarise(protein_coding_c = sum(protein_coding_c)) %>%
+                   filter(protein_coding_c == 1)
+
+selected_genes <- selected_genes[selected_genes %in% genes$ensembl_gene_id]
+# n protein coding genes = 13.130
+
+
+load("/home/acost1/BALL_project/data/RNA/counts_rlog_normalized.rds")
+
+NormByRlog_selected <- NormByRlog[selected_genes, !sub("\\_.*", "", colnames(NormByRlog)) %in%
+                                    c("CMP", "Mon", "nCD8")] 
+
+
+
+counts_long <- NormByRlog_selected %>%
+               as.data.frame() %>%
+               mutate(gene = rownames(NormByRlog_selected) )%>%
+               pivot_longer(!gene,names_to = "cell_type", values_to = "count")
+counts_long$group_cell_type <- sub("\\_.*", "", counts_long$cell_type)
+counts_long <- group_by(counts_long,gene, group_cell_type) %>%
+               summarise(avg_counts = mean(count)) %>%
+               filter(!group_cell_type %in% c("CMP", "Mon", "nCD8")) 
+
+
+counts_long$group_cell_type <- factor(counts_long$group_cell_type,
+                                         levels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"),
+                                         labels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC"))
+
+
+counts_long <- arrange(counts_long, gene, group_cell_type)
+
+counts_long %>% merge(results_limma_sv_common, by.x = "gene", by.y = "gene_id", all.y = TRUE) %>%
+  filter(!is.na(group_cell_type)) %>%
+  ggplot(aes(group_cell_type, avg_counts)) +
+  geom_line(aes(group = gene)) +
+  geom_line(stat = "summary", fun = "mean", colour = "brown", size = 1.5, 
+            aes(group = 1)) +
+  facet_wrap( ~ group, ncol = 6) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+ggsave("/home/acost1/BALL_project/results/longitudinal/ggplot_trajectories.png",
+       height = 30, width = 70, units = "cm")
+```
+
+
+```{r}
+# Enrichment analysis
+x <- enrichPathway(gene=de, pvalueCutoff = 0.05, readable=TRUE)
+
+
+genes_cluster <- counts_long %>% merge(results_limma_sv_common, by.x = "gene", by.y = "gene_id", all.y = TRUE)
+genes_cluster <- dplyr::select(genes_cluster, gene, group) %>%
+                        rename(cluster = group) 
+  
+
+
+pathways_clusters2 <- apply(data.frame(names(table(genes_cluster$cluster))), 1 , function(x){ 
+enrichPathway(gene = getBM(filters= "ensembl_gene_id", attributes= c("ensembl_gene_id",
+                                                "entrezgene_id"),
+                           values=genes_cluster$gene[genes_cluster$cluster == x],mart= mart)$entrezgene_id,
+                  pvalueCutoff = 1, readable=TRUE
+              )  } )
+
+
+
+
+pathways_clusters_sig <- lapply(pathways_clusters, function(x) filter(x, p.adjust < 0.01) )
+
+names(pathways_clusters_sig) <- data.frame(names(table(genes_cluster$cluster)))[,1]
+
+for(i in 1:30){enrichplot::cnetplot(pathways_clusters2[[i]], showCategory=20) }
+
+
+enrichplot::cnetplot(pathways_clusters2[[1]])
+enrichplot::treeplot(pairwise_termsim(pathways_clusters2[[1]]), hclust_method = "average")     
+enrichplot::treeplot(pairwise_termsim(pathways_clusters2[[3]]),  hclust_method = "average"  )
+enrichplot::treeplot(pairwise_termsim(pathways_clusters2[[4]]),  hclust_method = "average"  )
+enrichplot::treeplot(pairwise_termsim(pathways_clusters2[[5]]),  hclust_method = "average"  )
+enrichplot::treeplot(pairwise_termsim(pathways_clusters2[[6]]),  hclust_method = "average"  )
+enrichplot::treeplot(pairwise_termsim(pathways_clusters2[[7]]),  hclust_method = "average"  )
+enrichplot::treeplot(pairwise_termsim(pathways_clusters2[[8]]),  hclust_method = "average"  )
+```

@@ -1,0 +1,1274 @@
+---
+title: "Prepare files for GNN"
+author: "Anna CG"
+date: "2024-09-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+```{r}
+# Packages
+library(dplyr)
+library(stringr)
+library(biomaRt)
+library(tidyr)
+library(ggplot2)
+library(plyr)
+library(ggpubr)
+library(IRanges)
+library(readr)
+library(reshape2)
+```
+
+
+
+We have to create these two objects: 
+1) seq_bed_file.bed with id/id2, name_id, chr, start, end, expression, type (B, OE)
+
+2) edge_file.csv of lichi interactions with enhancers/silencers:  chr start1  end1 start2 end2 id_bait1 (id with numbers, will be the target) id_bait_oe (id with numbers, will be the source)
+
+
+```{r}
+# Load data.frame with interactions between the two fragments 
+load("/home/acost1/BALL_project/results/lichi_chromhmm/figures_biola/inter_annotated_gene_updated.rds") # n = 1.253.808  --> 1,303,771
+```
+
+
+We have 1.253.808 significant interactions (chicago >=5 in total), and 114.441 nodes: 21.299 baits, and 179.044 OE.
+
+These is the number of interactions and nodes per stage and type (for interactions: B_B and B_OE; for nodes: B and OE)
+
+```{r}
+n_inter_celltype <- inter_annotated_gene %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+plot_interactions <- inter_annotated_gene %>% group_by(cell_type, int) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  ddply("cell_type", transform, label_ypos=c(cumsum(rev(n))[1], n[2]/2) ) %>%
+  ggplot(aes(x=cell_type, y=n, fill=int)) +
+  geom_bar(stat="identity") +
+  geom_text(aes(y = label_ypos, label=n), vjust=-1.5, color="white") + 
+  scale_fill_brewer(palette="Paired") +
+  ylim(0, max(rep(n_inter_celltype$n, each = 2)) + 10000) + 
+  geom_label(aes(y = rep(n_inter_celltype$n, each = 2), label=rep(n_inter_celltype$n, each = 2)), vjust=-0.5, color="black", alpha=0) + 
+  guides(fill=guide_legend(title="Interaction type")) + 
+  ylab("# interactions") + xlab("")
+
+
+
+inter_baits <- rbind( dplyr::select(inter_annotated_gene, ID_1, node.class1, cell_type ) %>% dplyr::rename(id_bait = ID_1, node_class = node.class1),
+                      dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type ) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2) %>% filter(node_class == "B") ) %>%
+                filter(!duplicated(.))
+
+
+inter_OE <- dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type ) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2) %>%
+                  filter(node_class == "OE") %>%  filter(!duplicated(.))
+n_nodes_celltype <- rbind(inter_baits, inter_OE) %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+
+plot_nodes <- rbind(inter_baits, inter_OE) %>% group_by(cell_type, node_class) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  ddply("cell_type", transform, label_ypos=c(cumsum(rev(n))[1], n[2]/2) ) %>%
+  ggplot(aes(x=cell_type, y=n, fill=node_class)) +
+  geom_bar(stat="identity") +
+  geom_text(aes(y = label_ypos, label=n), vjust=-1.5, color="white") + 
+  ylim(0, max(rep(n_inter_celltype$n, each = 2)) + 10000) + 
+  geom_label(aes(y = rep(n_nodes_celltype$n, each = 2), label=rep(n_nodes_celltype$n, each = 2)), vjust=-0.5, color="black", alpha=0) + 
+  guides(fill=guide_legend(title="Node type")) + 
+  ylab("# nodes") + xlab("")
+
+
+ggarrange(plot_interactions, plot_nodes, ncol = 2)
+
+```
+
+```{r}
+nrow(inter_annotated_gene)
+
+length(unique(inter_baits$id_bait)) 
+length(unique(inter_OE$id_bait))
+
+length(unique(c(inter_annotated_gene$ID_1, inter_annotated_gene$ID_2)))
+```
+
+
+```{r}
+inter_baits <- rbind( dplyr::select(inter_annotated_gene, ID_1, node.class1, cell_type, start1, end1) %>% 
+                        dplyr::rename(id_bait = ID_1, node_class = node.class1, start = start1, end = end1),
+                      dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type,  start2, end2 ) %>% 
+                        dplyr::rename(id_bait = ID_2, node_class = node.class2, start = start2, end = end2) %>% filter(node_class == "B") ) %>% filter(!duplicated(.))
+inter_baits$length <- inter_baits$end - inter_baits$start
+
+
+
+inter_OE <- dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type , start2, end2) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2, start = start2, end = end2) %>%
+                  filter(node_class == "OE") %>%  filter(!duplicated(.))
+inter_OE$length <- inter_OE$end - inter_OE$start
+
+
+inter_elements <- rbind(inter_baits, inter_OE)
+
+tapply(inter_elements$length, inter_elements$node_class, summary)
+
+png("/home/acost1/BALL_project/scripts_analysis/gnn/bin_length2.png")
+boxplot(inter_elements$length ~ inter_elements$node_class, xlab = "", ylab = "bin length")
+dev.off()
+```
+
+
+
+
+- Keep only the OE that contain EA, EPr, EPo, and Silencers
+- Remove the non-annotated B
+
+```{r}
+# select only  B-B and B-OE (OE with enhancers or silencers) interactions, remove non-annotated baits, and only interactions for HSC and chromosome 1
+inter_annotated_gene <- inter_annotated_gene %>% filter(node.class2 == "B" | (node.class2 == "OE" & (EA_c == 1 | EPr_c == 1 | EPo_c == 1 | Sil_c == 1) ) ) %>%
+  filter(bait_2 != "non-annotated" &  B.id1 != "non-annotated" ) %>%
+  dplyr::select(seqnames1, start1, end1, node.class1, bait_1, seqnames2, start2, end2, node.class2, bait_2, chicago_score, cell_type, int, ID_1, ID_2,
+                EA_c, EPr_c, EPo_c, Sil_c) # n =  10.184
+```
+
+
+```{r}
+
+```
+
+
+Now, we have 586.019 significant interactions (chicago >=5 in total), and 114.441 nodes: 18.740 baits, and 95.701 OE.
+
+These is the number of interactions and nodes per stage and type (for interactions: B_B and B_OE; for nodes: B and OE)
+
+```{r}
+n_inter_celltype <- inter_annotated_gene %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+plot_interactions <- inter_annotated_gene %>% group_by(cell_type, int) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  ddply("cell_type", transform, label_ypos=c(cumsum(rev(n))[1], n[2]/2) ) %>%
+  ggplot(aes(x=cell_type, y=n, fill=int)) +
+  geom_bar(stat="identity") +
+  geom_text(aes(y = label_ypos, label=n), vjust=-1.5, color="white") + 
+  scale_fill_brewer(palette="Paired") +
+  ylim(0, max(rep(n_inter_celltype$n, each = 2)) + 10000) + 
+  geom_label(aes(y = rep(n_inter_celltype$n, each = 2), label=rep(n_inter_celltype$n, each = 2)), vjust=-0.5, color="black", alpha=0) + 
+  guides(fill=guide_legend(title="Interaction type")) + 
+  ylab("# interactions") + xlab("")
+
+
+
+inter_baits <- rbind( dplyr::select(inter_annotated_gene, ID_1, node.class1, cell_type ) %>% dplyr::rename(id_bait = ID_1, node_class = node.class1),
+                      dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type ) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2) %>% filter(node_class == "B") ) %>%
+                filter(!duplicated(.))
+
+
+inter_OE <- dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type ) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2) %>%
+                  filter(node_class == "OE") %>%  filter(!duplicated(.))
+n_nodes_celltype <- rbind(inter_baits, inter_OE) %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+
+plot_nodes <- rbind(inter_baits, inter_OE) %>% group_by(cell_type, node_class) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  ddply("cell_type", transform, label_ypos=c(cumsum(rev(n))[1], n[2]/2) ) %>%
+  ggplot(aes(x=cell_type, y=n, fill=node_class)) +
+  geom_bar(stat="identity") +
+  geom_text(aes(y = label_ypos, label=n), vjust=-1.5, color="white") + 
+  ylim(0, max(rep(n_inter_celltype$n, each = 2)) + 10000) + 
+  geom_label(aes(y = rep(n_nodes_celltype$n, each = 2), label=rep(n_nodes_celltype$n, each = 2)), vjust=-0.5, color="black", alpha=0) + 
+  guides(fill=guide_legend(title="Node type")) + 
+  ylab("# nodes") + xlab("")
+
+
+ggarrange(plot_interactions, plot_nodes, ncol = 2)
+```
+
+
+```{r}
+nrow(inter_annotated_gene)
+length(unique(inter_baits$id_bait))
+length(unique(inter_OE$id_bait))
+
+length(unique(c(inter_annotated_gene$ID_1, inter_annotated_gene$ID_2)))
+```
+
+
+check how many Baits have multiple genes in the region per each stage --> plot
+
+```{r}
+inter_baits <- rbind( dplyr::select(inter_annotated_gene, ID_1, node.class1, cell_type, bait_1 ) %>% dplyr::rename(id_bait = ID_1, node_class = node.class1, bait = bait_1),
+                      dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type, bait_2 ) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2, bait = bait_2) %>% filter(node_class == "B") ) %>%
+                filter(!duplicated(.))
+
+
+inter_baits$n_genes <- sapply(strsplit(inter_baits$bait, ","), function(x) length(x))
+inter_baits$n_genes_c <- NA
+inter_baits$n_genes_c[inter_baits$n_genes == 1] <- "1 gene"
+inter_baits$n_genes_c[inter_baits$n_genes == 2] <- "2 genes"
+inter_baits$n_genes_c[inter_baits$n_genes > 2] <- "> 2 genes"
+inter_baits$n_genes_c <- factor(inter_baits$n_genes_c, levels = c("1 gene", "2 genes", "> 2 genes"),
+                                                   labels = c("1 gene", "2 genes", "> 2 genes") )
+
+n_nodes_celltype <- rbind(inter_baits) %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+plot_genes_nodes <- inter_baits %>% group_by(cell_type, n_genes_c) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  group_by(cell_type) %>% mutate(perc = n / sum(n), n_total = sum(n)) %>%
+  ggplot(aes(x=cell_type, y=perc, fill=n_genes_c, label = scales::percent(round(perc,3)) ))  +
+  geom_bar(stat="identity") +
+  geom_text(size = 3, position = position_stack(vjust = 0.5)) +
+  geom_label(aes(y = 1, label=n_total), vjust=-0.5, color="black", alpha=0) + 
+  ylim(0,1.5) +
+  scale_y_continuous(labels = scales::percent) +
+  guides(fill=guide_legend(title="Number of genes")) + 
+  ylab("") + xlab("")
+```
+
+
+check how many OE have multiple EA, EPr, or EPo and Sil  --> plot
+
+```{r}
+inter_OE <- dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type, EA_c, EPr_c, EPo_c, Sil_c ) %>% 
+            dplyr::rename(id_bait = ID_2, node_class = node.class2) %>%
+                   filter(node_class == "OE") %>%  filter(!duplicated(.))
+inter_OE$cis_regulatory <- NA
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 0] <- "Only EA"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 0] <- "Only EPo"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 0] <- "Only EPr"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 1] <- "Only Sil"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 0] <- "Other"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 0] <- "EA and EPr"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 1] <- "Other"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 0] <- "EPo and EPr"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 1] <- "EPo and Sil"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 1] <- "EPr and Sil"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 0] <- "Other"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 1] <- "EA, EPr, and Sil"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 1] <- "Other"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 1] <- "EPo, EPr, and Sil"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 1] <- "EA, EPr, EPo, and Sil"
+inter_OE$cis_regulatory <- factor(inter_OE$cis_regulatory, levels = rev(names(table(inter_OE$cis_regulatory))),
+                                      labels = rev(names(table(inter_OE$cis_regulatory))))
+
+# Other: EA, EPo, and Sil / EA and EPo / EA and Sil / EA, EPo, and EPr
+n_nodes_celltype <- inter_OE %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+
+inter_OE %>% group_by(cell_type, cis_regulatory) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  group_by(cell_type) %>% mutate(perc = n / sum(n)) %>%
+  ddply("cell_type", transform, label_ypos=c((cumsum(n)) )) %>%
+  ggplot(aes(x=cell_type, y=n, fill=cis_regulatory, label = scales::percent(round(perc,3)) )) +
+  geom_bar(stat="identity") +
+  geom_text(size = 3, position = position_stack(vjust = 0.5)) +
+  scale_fill_brewer(palette = "Paired" ) +
+  guides(fill=guide_legend(title="Cis-regulatory elements")) + 
+  ylab("") + xlab("")
+
+# subset_Dat <- filter(inter_OE, cell_type %in% levels(inter_OE$cell_type)[1:5]) 
+# resu2 <- compareGroups(cell_type ~ cis_regulatory, data= subset_Dat)
+# createTable(resu2)
+
+n_nodes_celltype <- rbind(inter_OE) %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+plot_OE_nodes  <- inter_OE %>% group_by(cell_type, cis_regulatory) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  group_by(cell_type) %>% mutate(perc = n / sum(n), n_total = sum(n)) %>%
+  ggplot(aes(x=cell_type, y=perc, fill=cis_regulatory, label = scales::percent(round(perc,3)) ))  +
+  geom_bar(stat="identity") +
+  geom_text(size = 3, position = position_stack(vjust = 0.5)) +
+  scale_fill_brewer(palette = "Paired" ) +
+  geom_label(aes(y = 1, label=n_total), vjust=-0.5, color="black", alpha=0) + 
+  ylim(0,1.5) +
+  scale_y_continuous(labels = scales::percent) +
+  guides(fill=guide_legend(title="Cis-regulatory elements")) + 
+  ylab("") + xlab("")
+
+```
+
+
+```{r}
+ggarrange(plot_genes_nodes, plot_OE_nodes, ncol = 2)
+```
+
+
+```{r}
+
+```
+
+
+NON-SPLIT NODE
+
+put the expression (with ensembl code, id) 
+  - if multiple genes in one bait, median of the expression
+
+
+```{r}
+bait1 <- dplyr::select(inter_annotated_gene, ID_1, node.class1, bait_1 ) %>% dplyr::rename(id_bait = ID_1, node_class = node.class1, bait = bait_1)
+
+bait2 <- dplyr::select(inter_annotated_gene, ID_2, node.class2, bait_2 ) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2, bait = bait_2) %>% filter(node_class == "B")
+
+bait1_id <- unique(bait1$id_bait) 
+bait2_id <- unique(bait2$id_bait) 
+
+
+intersect(bait1_id, bait2_id) %>% length() # both regions: 13150 Baits
+bait1_id[!bait1_id %in% bait2_id] %>% length() # only region 1: 4838 baits
+bait2_id[!bait2_id %in% bait1_id] %>% length() # only region 1: 752 baits
+
+
+length(unique(c(bait1_id, bait2_id))) # 18740
+
+inter_baits <- rbind( bait1, bait2) %>%
+                filter(!duplicated(.)) # only 1870 regions
+
+
+
+# Compute expression for these regions
+inter_baits <- inter_baits %>% dplyr::select(id_bait, bait) %>% filter(!duplicated(.))
+
+
+inter_baits <- apply(data.frame(inter_baits), 1, function(x){
+  n <- length(str_split_1(x[["bait"]], ","))
+  
+  data.frame(id_bait = rep(x[["id_bait"]], n),
+             bait = str_split_1(x[["bait"]], ",") 
+             ) 
+} ) %>% bind_rows()
+
+
+# See if genes are showed as symbols or ensembl id
+inter_baits$gene_type <- ifelse(startsWith(inter_baits$bait, "ENSG") == TRUE, "ensembl", "symbol")
+
+# hgnc_symbol to ensembl_gene_id (those with hgnc_symbol)
+mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
+genes_ensembl <- biomaRt::getBM(filters= "hgnc_symbol",
+                                attributes = c("hgnc_symbol", "ensembl_gene_id", "start_position", "chromosome_name", "gene_biotype"), 
+                                values = unique(inter_baits$bait), 
+                                mart = mart) # n = 23836 --> unique = 21224
+
+# remove genes that are not annotated in chr 1:23, X, Y (n = 21281) --> unique = 21224 (removed n = 2555, unique = 0)
+genes_ensembl <- filter(genes_ensembl, chromosome_name %in% names(table(inter_annotated_gene$seqnames1)) ) 
+
+# remove genes that have hgnc_symbol duplicated (n = 21167) --> unique = 21167  (removed n = 114, unique = 57)
+hgnc_symbol_dupl <- genes_ensembl$hgnc_symbol[duplicated(genes_ensembl$hgnc_symbol)]
+genes_ensembl <- filter(genes_ensembl, !hgnc_symbol %in% hgnc_symbol_dupl )
+
+  
+
+inter_baits_simple <- merge(inter_baits, genes_ensembl, by.x = "bait", by.y = "hgnc_symbol", all.x = TRUE)
+
+# leave ensembl id the same in the column ensembl_gene_id
+inter_baits_simple$ensembl_gene_id[inter_baits_simple$gene_type == "ensembl"] <- inter_baits_simple$bait[inter_baits_simple$gene_type == "ensembl"]
+
+
+#- Couldn't find 40 gene ensembl id 
+rm_bait <- inter_baits_simple$bait[is.na(inter_baits_simple$ensembl_gene_id)]
+inter_baits_simple <- inter_baits_simple[!is.na(inter_baits_simple$ensembl_gene_id),] 
+
+
+
+# get the expression for these baits
+# load("/home/acost1/BALL_project/data/RNA/counts_rlog_normalized.rds")
+
+load("/home/acost1/BALL_project/data/RNA/counts_tmm_normalized_all_log.rds")
+
+# Get the mean expression for combination of cell type and gene
+
+# Pivot long
+NormByTMM_long <- NormByTMM_all_log %>% as.data.frame() %>%
+  mutate(genes = rownames(NormByTMM_all_log)) %>%
+  pivot_longer(!genes, names_to = "cell_type", values_to = "expression")
+
+# Categories of a cell type
+NormByTMM_long$cell_type_c <- lapply(str_split(NormByTMM_long$cell_type, "_"),
+                                      function(x) x[[1]]) %>% unlist()
+
+# Median expression
+NormByTMM_long <- NormByTMM_long %>% group_by(genes, cell_type_c) %>%
+  dplyr::summarise(expression = median(expression)) %>%
+  filter(!cell_type_c %in% c("CMP", "Mon", "nCD8") ) %>%
+  dplyr::rename(B.id1 = genes,
+                cell_type = cell_type_c)
+NormByTMM_long$cell_type[NormByTMM_long$cell_type == "nB"] = "nB1Mnew"
+
+NormByTMM_long$cell_type <- factor(NormByTMM_long$cell_type, 
+                                         levels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB1Mnew", "GCB", "memB", "PC"),
+                                         labels = c("HSC", "PrePro-B", "Pro-B", "Pre-B", "Trans-B", "nB", "GCB", "Mem-B", "Plasma"))
+
+
+
+```
+
+
+```{r}
+bait1 <- dplyr::select(inter_annotated_gene, ID_1, node.class1, cell_type, bait_1 ) %>% dplyr::rename(id_bait = ID_1, node_class = node.class1, bait = bait_1)
+
+bait2 <- dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type, bait_2 ) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2, bait = bait_2) %>% filter(node_class == "B")
+
+bait1_id <- unique(bait1$id_bait) 
+bait2_id <- unique(bait2$id_bait) 
+
+
+intersect(bait1_id, bait2_id) %>% length() # both regions: 13150 Baits
+bait1_id[!bait1_id %in% bait2_id] %>% length() # only region 1: 4838 baits
+bait2_id[!bait2_id %in% bait1_id] %>% length() # only region 1: 752 baits
+
+
+length(unique(c(bait1_id, bait2_id))) # 18740
+
+inter_baits <- rbind( bait1, bait2) %>%
+                filter(!duplicated(.))
+unique(inter_baits$id_bait) %>% length() # only 1870 regions
+
+
+
+# Compute expression for these regions
+
+inter_baits <- apply(data.frame(inter_baits), 1, function(x){
+  n <- length(str_split_1(x[["bait"]], ","))
+  
+  data.frame(id_bait = rep(x[["id_bait"]], n),
+             bait = str_split_1(x[["bait"]], ","),
+             cell_type = rep(x[["cell_type"]], n)
+             ) 
+} ) %>% bind_rows()
+
+
+
+# 
+inter_baits <- merge(inter_baits, inter_baits_simple, by = c("id_bait", "bait"), all.y = TRUE)
+
+
+
+# Merge the expression data with the combination of cell type (HSC) and gene (with ensemble id), from BAIT_1
+inter_baits <- merge(inter_baits, NormByTMM_long, by.x = c("ensembl_gene_id", "cell_type"), by.y = c("B.id1", "cell_type"), all.x = TRUE)
+
+# n = 4, not found expression
+# filter(inter_baits, is.na(expression)) %>% dplyr::select(ensembl_gene_id) %>% filter(!duplicated(.))
+rm_expression <- inter_baits[is.na(inter_baits$expression),]
+inter_baits_all <- filter(inter_baits, !is.na(expression))
+
+inter_baits <- inter_baits %>% group_by(id_bait, cell_type) %>% dplyr::summarise(expression = median(expression))
+```
+
+
+check once more the num of interactions and baits (+ # genes and cis-regulatory elements)
+
+```{r}
+bait1 <- dplyr::select(inter_annotated_gene, ID_1, node.class1, cell_type, bait_1 ) %>% dplyr::rename(id_bait = ID_1, node_class = node.class1, bait = bait_1)
+
+bait2 <- dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type, bait_2 ) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2, bait = bait_2) %>% filter(node_class == "B")
+
+bait1_id <- unique(bait1$id_bait) 
+bait2_id <- unique(bait2$id_bait) 
+
+
+intersect(bait1_id, bait2_id) %>% length() # both regions: 13150 Baits
+bait1_id[!bait1_id %in% bait2_id] %>% length() # only region 1: 4838 baits
+bait2_id[!bait2_id %in% bait1_id] %>% length() # only region 1: 752 baits
+
+
+all_baits <- unique(c(bait1_id, bait2_id))
+
+
+all_baits[all_baits %in% unique(as.numeric(inter_baits_simple$id_bait) ) ] %>% length()
+```
+
+
+```{r}
+inter_baits$id_bait <- as.numeric(inter_baits$id_bait)
+
+inter_annotated_gene <- merge(inter_annotated_gene, 
+                              inter_baits,
+                              by.x = c("ID_1", "cell_type"), 
+                              by.y = c("id_bait", "cell_type"),
+                              all.x = TRUE)
+
+inter_annotated_gene <- filter(inter_annotated_gene, !is.na(expression) ) # n = 497.157
+
+
+inter_annotated_gene <- merge(inter_annotated_gene, 
+                              inter_baits,
+                              by.x = c("ID_2", "cell_type"), 
+                              by.y = c("id_bait", "cell_type"),
+                              all.x = TRUE)
+inter_annotated_gene <- filter(inter_annotated_gene, !(is.na(expression.y) & node.class2 == "B") )
+
+```
+
+
+```{r}
+n_inter_celltype <- inter_annotated_gene %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+plot_interactions_notsplit <- inter_annotated_gene %>% group_by(cell_type, int) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  ddply("cell_type", transform, label_ypos=c(cumsum(rev(n))[1], n[2]/2) ) %>%
+  ggplot(aes(x=cell_type, y=n, fill=int)) +
+  geom_bar(stat="identity") +
+  geom_text(aes(y = label_ypos, label=n), vjust=-1.5, color="white") + 
+  scale_fill_brewer(palette="Paired") +
+  ylim(0, max(rep(n_inter_celltype$n, each = 2)) + 10000) + 
+  geom_label(aes(y = rep(n_inter_celltype$n, each = 2), label=rep(n_inter_celltype$n, each = 2)), vjust=-0.5, color="black", alpha=0) + 
+  guides(fill=guide_legend(title="Interaction type")) + 
+  ylab("# interactions") + xlab("")
+
+
+
+inter_baits <- rbind( dplyr::select(inter_annotated_gene, ID_1, node.class1, cell_type ) %>% dplyr::rename(id_bait = ID_1, node_class = node.class1),
+                      dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type ) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2) %>% filter(node_class == "B") ) %>%
+                filter(!duplicated(.))
+
+
+inter_OE <- dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type ) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2) %>%
+                  filter(node_class == "OE") %>%  filter(!duplicated(.))
+n_nodes_celltype <- rbind(inter_baits, inter_OE) %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+
+plot_nodes_notsplit <- rbind(inter_baits, inter_OE) %>% group_by(cell_type, node_class) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  ddply("cell_type", transform, label_ypos=c(cumsum(rev(n))[1], n[2]/2) ) %>%
+  ggplot(aes(x=cell_type, y=n, fill=node_class)) +
+  geom_bar(stat="identity") +
+  geom_text(aes(y = label_ypos, label=n), vjust=-1.5, color="white") + 
+  ylim(0, max(rep(n_inter_celltype$n, each = 2)) + 10000) + 
+  geom_label(aes(y = rep(n_nodes_celltype$n, each = 2), label=rep(n_nodes_celltype$n, each = 2)), vjust=-0.5, color="black", alpha=0) + 
+  guides(fill=guide_legend(title="Node type")) + 
+  ylab("# nodes") + xlab("")
+
+
+ggarrange(plot_interactions_notsplit, plot_nodes_notsplit, ncol = 2)
+```
+
+```{r}
+nrow(inter_annotated_gene)
+length(unique(inter_baits$id_bait))
+length(unique(inter_OE$id_bait))
+
+length(unique(c(inter_annotated_gene$ID_1, inter_annotated_gene$ID_2)))
+```
+
+
+
+```{r}
+inter_baits <- rbind( dplyr::select(inter_annotated_gene, ID_1, node.class1, cell_type, bait_1 ) %>% dplyr::rename(id_bait = ID_1, node_class = node.class1, bait = bait_1),
+                      dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type, bait_2 ) %>% dplyr::rename(id_bait = ID_2, node_class = node.class2, bait = bait_2) %>% filter(node_class == "B") ) %>%
+                filter(!duplicated(.))
+
+
+inter_baits$n_genes <- sapply(strsplit(inter_baits$bait, ","), function(x) length(x))
+inter_baits$n_genes_c <- NA
+inter_baits$n_genes_c[inter_baits$n_genes == 1] <- "1 gene"
+inter_baits$n_genes_c[inter_baits$n_genes == 2] <- "2 genes"
+inter_baits$n_genes_c[inter_baits$n_genes > 2] <- "> 2 genes"
+inter_baits$n_genes_c <- factor(inter_baits$n_genes_c, levels = c("1 gene", "2 genes", "> 2 genes"),
+                                                   labels = c("1 gene", "2 genes", "> 2 genes") )
+
+n_nodes_celltype <- rbind(inter_baits) %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+plot_genes_nodes2 <- inter_baits %>% group_by(cell_type, n_genes_c) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  group_by(cell_type) %>% mutate(perc = n / sum(n), n_total = sum(n)) %>%
+  ggplot(aes(x=cell_type, y=perc, fill=n_genes_c, label = scales::percent(round(perc,3)) ))  +
+  geom_bar(stat="identity") +
+  geom_text(size = 3, position = position_stack(vjust = 0.5)) +
+  geom_label(aes(y = 1, label=n_total), vjust=-0.5, color="black", alpha=0) + 
+  ylim(0,1.5) +
+  scale_y_continuous(labels = scales::percent) +
+  guides(fill=guide_legend(title="Number of genes")) + 
+  ylab("") + xlab("")
+```
+
+
+check how many OE have multiple EA, EPr, or EPo and Sil  --> plot
+
+```{r}
+inter_OE <- dplyr::select(inter_annotated_gene, ID_2, node.class2, cell_type, EA_c, EPr_c, EPo_c, Sil_c ) %>% 
+            dplyr::rename(id_bait = ID_2, node_class = node.class2) %>%
+                   filter(node_class == "OE") %>%  filter(!duplicated(.))
+inter_OE$cis_regulatory <- NA
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 0] <- "Only EA"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 0] <- "Only EPo"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 0] <- "Only EPr"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 1] <- "Only Sil"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 0] <- "Other"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 0] <- "EA and EPr"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 1] <- "Other"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 0] <- "EPo and EPr"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 1] <- "EPo and Sil"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 1] <- "EPr and Sil"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 0] <- "Other"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 0 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 1] <- "EA, EPr, and Sil"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 0 & inter_OE$Sil_c == 1] <- "Other"
+inter_OE$cis_regulatory[inter_OE$EA_c == 0 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 1] <- "EPo, EPr, and Sil"
+inter_OE$cis_regulatory[inter_OE$EA_c == 1 & inter_OE$EPo_c == 1 & inter_OE$EPr_c == 1 & inter_OE$Sil_c == 1] <- "EA, EPr, EPo, and Sil"
+inter_OE$cis_regulatory <- factor(inter_OE$cis_regulatory, levels = rev(names(table(inter_OE$cis_regulatory))),
+                                      labels = rev(names(table(inter_OE$cis_regulatory))))
+
+# Other: EA, EPo, and Sil / EA and EPo / EA and Sil / EA, EPo, and EPr
+n_nodes_celltype <- inter_OE %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+
+inter_OE %>% group_by(cell_type, cis_regulatory) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  group_by(cell_type) %>% mutate(perc = n / sum(n)) %>%
+  ddply("cell_type", transform, label_ypos=c((cumsum(n)) )) %>%
+  ggplot(aes(x=cell_type, y=n, fill=cis_regulatory, label = scales::percent(round(perc,3)) )) +
+  geom_bar(stat="identity") +
+  geom_text(size = 3, position = position_stack(vjust = 0.5)) +
+  scale_fill_brewer(palette = "Paired" ) +
+  guides(fill=guide_legend(title="Cis-regulatory elements")) + 
+  ylab("") + xlab("")
+
+# subset_Dat <- filter(inter_OE, cell_type %in% levels(inter_OE$cell_type)[1:5]) 
+# resu2 <- compareGroups(cell_type ~ cis_regulatory, data= subset_Dat)
+# createTable(resu2)
+
+n_nodes_celltype <- rbind(inter_OE) %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+plot_OE_nodes2  <- inter_OE %>% group_by(cell_type, cis_regulatory) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  group_by(cell_type) %>% mutate(perc = n / sum(n), n_total = sum(n)) %>%
+  ggplot(aes(x=cell_type, y=perc, fill=cis_regulatory, label = scales::percent(round(perc,3)) ))  +
+  geom_bar(stat="identity") +
+  geom_text(size = 3, position = position_stack(vjust = 0.5)) +
+  scale_fill_brewer(palette = "Paired" ) +
+  geom_label(aes(y = 1, label=n_total), vjust=-0.5, color="black", alpha=0) + 
+  ylim(0,1.5) +
+  scale_y_continuous(labels = scales::percent) +
+  guides(fill=guide_legend(title="Cis-regulatory elements")) + 
+  ylab("") + xlab("")
+
+```
+
+
+```{r}
+ggarrange(plot_genes_nodes2, plot_OE_nodes2, ncol = 2)
+```
+
+build 2 files
+
+
+```{r}
+id_1 <- dplyr::select(inter_annotated_gene, ID_1, bait_1, seqnames1, start1, end1, expression.x, cell_type, node.class1) %>%
+  dplyr::rename(id = ID_1,
+         name_id = bait_1,
+         seqnames = seqnames1,
+         start = start1,
+         end = end1,
+         expression = expression.x,
+         type = node.class1)
+
+id_2 <- dplyr::select(inter_annotated_gene, ID_2, bait_2, seqnames2, start2, end2, expression.y, cell_type, node.class2) %>%
+  dplyr::rename(id = ID_2,
+         name_id = bait_2,
+         seqnames = seqnames2,
+         start = start2,
+         end = end2,
+         expression = expression.y,
+         type = node.class2)
+
+id_bed <- rbind(id_1, id_2) %>%
+  mutate(seqnames = as.numeric(seqnames),
+         start = as.numeric(start),
+         end = as.numeric(end)) %>%
+  filter(!duplicated(.))
+
+
+length(unique(id_bed$id))
+
+
+tapply(id_bed$id, id_bed$cell_type, function(x) length((x) ) )
+
+
+
+```
+
+
+```{r}
+edge_file <- inter_annotated_gene %>% dplyr::select(seqnames1, start1, end1, ID_1, seqnames2, start2, end2, ID_2, chicago_score, cell_type) %>% 
+  mutate(chicago_score = as.numeric(chicago_score),
+         seqnames1 = as.numeric(seqnames1),
+         seqnames2 = as.numeric(seqnames2),
+         start1 = as.numeric(start1),
+         end1 = as.numeric(end1),
+         start2 = as.numeric(start2),
+         end2 = as.numeric(end2) )
+
+
+table(edge_file$cell_type)
+```
+
+
+
+```{r}
+id_bed$seqnames <- as.character(id_bed$seqnames)
+id_bed$seqnames[id_bed$seqnames == "23"] <- "X"
+id_bed$seqnames[id_bed$seqnames == "24"] <- "Y"
+
+# n = 363.651
+write.table(id_bed, file = "/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit_updated.bed", col.names = FALSE, row.names = FALSE,
+            sep = "\t", quote = FALSE)
+save(id_bed, file = "/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit_updated.rds")
+
+
+
+# n = 579303
+edge_file$seqnames1 <- as.character(edge_file$seqnames1)
+edge_file$seqnames1[edge_file$seqnames1 == "23"] <- "X"
+edge_file$seqnames1[edge_file$seqnames1 == "24"] <- "Y"
+
+
+edge_file$seqnames2 <- as.character(edge_file$seqnames2)
+edge_file$seqnames2[edge_file$seqnames2 == "23"] <- "X"
+edge_file$seqnames2[edge_file$seqnames2 == "24"] <- "Y"
+
+write.csv(edge_file, file = "/home/acost1/BALL_project/results/gnn/edge_file_notsplit_updated.csv", row.names = FALSE)
+save(edge_file, file = "/home/acost1/BALL_project/results/gnn/edge_file_notsplit_updated.rds")
+
+
+```
+
+# Subset
+```{r}
+load("/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit.rds")
+load("/home/acost1/BALL_project/results/gnn/edge_file_notsplit.rds")
+
+
+aux <- id_bed %>% filter(type == "B") 
+aux <- dcast(aux, formula = id ~ cell_type, fun.aggregate = length)
+ids_selected <- sample(aux$id[apply(aux[,-1], 1, sum) == 9], 1000)
+ids_oe <- id_bed$id[id_bed$type == "OE"]
+
+
+id_bed_subset <- id_bed[id_bed$id %in% c(ids_selected, ids_oe),]
+
+write.table(id_bed_subset, file = "/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit_subset.bed", col.names = FALSE, row.names = FALSE,
+            sep = "\t", quote = FALSE)
+save(id_bed_subset, file = "/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit_subset.rds")
+
+sum(ids_selected == 771226)
+
+
+summary(edge_file$ID_2)
+
+
+edge_file <- merge(edge_file, id_bed %>% dplyr::select(id, type) %>% filter(!duplicated(.)), 
+      by.x = "ID_2", "id", all.x = TRUE)
+
+
+write.csv(edge_file, file = "/home/acost1/BALL_project/results/gnn/edge_file_notsplit.csv", row.names = FALSE)
+save(edge_file, file = "/home/acost1/BALL_project/results/gnn/edge_file_notsplit.rds")
+```
+
+
+
+
+
+SPLIT NODES
+
+split both B and OE, and recount the number of Interactions and baits
+  - we should change the start and end
+  - put the expression (with ensembl code, id)
+  
+```{r}
+inter_baits_simple$id_bait <- as.numeric(inter_baits_simple$id_bait)
+     
+bed <- unique(id_bed$id[id_bed$type == "B"]) 
+simple <- unique(inter_baits_simple$id_bait) # n = 18539
+
+
+# Only want the 18.525 baits on id_bed
+
+inter_baits_simple <- filter(inter_baits_simple, id_bait %in% bed)     
+
+# length(unique(inter_baits_simple$id_bait))  # n = 18.525
+
+
+# add expression for each gene and cell type
+inter_baits_simple <- merge(inter_baits_simple, NormByTMM_long, by.x = "ensembl_gene_id", by.y = "B.id1", all.x = TRUE)
+
+
+# Add start and end for each bait
+inter_baits_simple <- merge(inter_baits_simple, 
+                              dplyr::select(inter_annotated_gene, ID_1, cell_type, seqnames1, start1, end1),
+                              by.y = c("ID_1", "cell_type"), 
+                              by.x = c("id_bait", "cell_type"),
+                              all.x = TRUE) 
+inter_baits_simple <-inter_baits_simple  %>% filter(!duplicated(.))
+
+
+inter_baits_simple <- merge(inter_baits_simple, 
+                              dplyr::select(inter_annotated_gene, ID_2, cell_type, seqnames2, start2, end2),
+                              by.y = c("ID_2", "cell_type"), 
+                              by.x = c("id_bait", "cell_type"),
+                              all.x = TRUE)
+inter_baits_simple <-inter_baits_simple  %>% filter(!duplicated(.))
+
+
+# Join seqnames 1 and 2, start 1 and 2, end 1 and 2
+
+list_seqnames <- apply(inter_baits_simple, 1, function(x) {
+                             seqnames <- unique(c(x[["seqnames1"]], x[["seqnames2"]]) )
+                             seqnames[!is.na(seqnames)] } ) 
+is.na(list_seqnames) <- lengths(list_seqnames) == 0
+inter_baits_simple$seqnames <- unlist(list_seqnames)
+
+list_start <- apply(inter_baits_simple, 1, function(x) {
+                             start <- unique(c(x[["start1"]], x[["start2"]]) )
+                             start[!is.na(start)] } ) 
+is.na(list_start) <- lengths(list_start) == 0
+inter_baits_simple$start <- unlist(list_start)
+
+list_end <- apply(inter_baits_simple, 1, function(x) {
+                             end <- unique(c(x[["end1"]], x[["end2"]]) )
+                             end[!is.na(end)] } ) 
+is.na(list_end) <- lengths(list_end) == 0
+inter_baits_simple$end <- unlist(list_end)
+
+# sum(is.na(inter_baits_simple$seqnames))
+# sum(is.na(inter_baits_simple$start))
+# sum(is.na(inter_baits_simple$end))
+
+
+inter_baits_simple <- inter_baits_simple %>% filter(!is.na(seqnames))
+```
+
+
+```{r}
+baits_gene <- inter_baits_simple %>% dplyr::select(ensembl_gene_id, id_bait, seqnames, start, end) %>%
+              filter(!duplicated(.))
+
+# one gene can be in multiple baits (n genes = 1.968)
+aux <- baits_gene %>% group_by(ensembl_gene_id) %>% dplyr::summarise(n = n()) %>% filter(n > 1)
+gene1_baitM <- baits_gene %>% filter(ensembl_gene_id %in% aux$ensembl_gene_id)
+ 
+# one bait can contain multiple genes (n genes = 13.834)
+aux <- baits_gene %>% group_by(id_bait) %>% dplyr::summarise(n = n()) %>% filter(n > 1)
+geneM_bait1 <- baits_gene %>% filter(id_bait %in% aux$id_bait)
+geneM_bait1 <- geneM_bait1 %>% filter(!ensembl_gene_id %in% gene1_baitM$ensembl_gene_id)
+
+
+# one gene can be inside an unique bait (n genes = 10.233)
+gene1_bait1 <- baits_gene %>% filter(!(ensembl_gene_id %in% c(gene1_baitM$ensembl_gene_id, geneM_bait1$ensembl_gene_id)) )
+```
+
+
+```{r}
+genes_ensembl <- biomaRt::getBM(filters= "ensembl_gene_id",
+                                attributes = c("ensembl_gene_id", "strand", "entrezgene_id", "start_position", "end_position","chromosome_name", "gene_biotype"), 
+                                values = unique(c(gene1_baitM$ensembl_gene_id, geneM_bait1$ensembl_gene_id)), 
+                                mart = mart) 
+genes_ensembl <- genes_ensembl[!duplicated(genes_ensembl$ensembl_gene_id),]
+
+genes_ensembl$start_promoter[genes_ensembl$strand == 1] <- genes_ensembl$start_position[genes_ensembl$strand == 1] - 2000
+genes_ensembl$start_promoter[genes_ensembl$strand == -1] <-  genes_ensembl$end_position[genes_ensembl$strand == -1] - 200 
+genes_ensembl$end_promoter[genes_ensembl$strand == 1] <- genes_ensembl$start_position[genes_ensembl$strand == 1] + 200
+genes_ensembl$end_promoter[genes_ensembl$strand == -1] <- genes_ensembl$end_position[genes_ensembl$strand == -1] + 2000
+
+
+inter_baits_simple <- merge(inter_baits_simple, 
+      rbind(genes_ensembl %>% dplyr::select(ensembl_gene_id, start_promoter, end_promoter),
+            gene1_bait1 %>% dplyr::select(ensembl_gene_id, start, end) %>% dplyr::rename(start_promoter = start, end_promoter = end) ),
+      by = "ensembl_gene_id", all.x = TRUE) 
+```
+
+```{r}
+nrow(genes_ensembl)
+length(unique(genes_ensembl$ensembl_gene_id))
+```
+
+
+```{r}
+hist(as.numeric(gene1_bait1$end) - as.numeric(gene1_bait1$start) )
+summary(as.numeric(gene1_bait1$end) - as.numeric(gene1_bait1$start) )
+```
+
+
+Split the OE into ChromHMM tracks
+
+```{r}
+load("/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit.rds")
+split_oe <- id_bed %>% filter(type == "OE")  %>% dplyr::select(id, seqnames, start, end, cell_type) %>% 
+              filter(!duplicated(.)) %>%
+              dplyr::rename(chr = seqnames)
+rm(id_bed)
+
+
+# split_oe$chr <- as.character(split_oe$chr)
+# split_oe$chr[split_oe$chr == "23"] <- "X"
+# split_oe$chr[split_oe$chr == "24"] <- "Y"
+
+table(split_oe$chr)
+```
+
+
+1) Get the ChromHMM files
+```{r}
+  hsc_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/HSC05_15_dense_fin.bed",  col_names = FALSE,
+                                col_types = cols(X1 = col_character()))
+  hsc_chromhmm <- hsc_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "HSC")
+  
+  prepro_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/PreProB05_15_dense_fin.bed",  col_names = FALSE,
+                                col_types = cols(X1 = col_character()))
+  prepro_chromhmm <- prepro_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "PrePro-B")
+  
+  pro_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/ProB05_15_dense_fin.bed",  col_names = FALSE,
+                             col_types = cols(X1 = col_character()))
+  pro_chromhmm <- pro_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "Pro-B")
+  
+  pre_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/PreB05_15_dense_fin.bed",  col_names = FALSE,
+                             col_types = cols(X1 = col_character()))
+  pre_chromhmm <- pre_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "Pre-B")
+  
+  trans_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/immtransB05_15_dense_fin.bed",  col_names = FALSE,
+                               col_types = cols(X1 = col_character()))
+  trans_chromhmm <- trans_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr:: rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "Trans-B")
+  
+  nb_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/nB05_15_dense_fin.bed",  col_names = FALSE,
+                            col_types = cols(X1 = col_character()))
+  nb_chromhmm <- nb_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "nB")
+  
+  gcb_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/GCB05_15_dense_fin.bed",  col_names = FALSE,
+                             col_types = cols(X1 = col_character()))
+  gcb_chromhmm <- gcb_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "GCB")
+  
+  memb_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/memB05_15_dense_fin.bed",  col_names = FALSE,
+                              col_types = cols(X1 = col_character()))
+  memb_chromhmm <- memb_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "Mem-B")
+  
+  pc_chromhmm <- read_table("/home/acost1/BALL_project/data/ChromHMM/PC05_15_dense_fin.bed",  col_names = FALSE,
+                            col_types = cols(X1 = col_character()))
+  pc_chromhmm <- pc_chromhmm %>% dplyr:: select(X1, X2, X3, X4) %>%
+    dplyr::rename(chr = X1, start = X2, end = X3, category = X4) %>%
+    mutate(cell_type = "Plasma")
+  
+  chromhmm <- rbind(hsc_chromhmm, prepro_chromhmm, pro_chromhmm, pre_chromhmm, trans_chromhmm,
+                    nb_chromhmm, gcb_chromhmm, memb_chromhmm, pc_chromhmm)
+  
+  rm(hsc_chromhmm, prepro_chromhmm, pro_chromhmm, pre_chromhmm, trans_chromhmm,
+     nb_chromhmm, gcb_chromhmm, memb_chromhmm, pc_chromhmm)
+  print("load chromhmm files!")
+
+chromhmm <-  filter(chromhmm, category != "None")
+chromm_names <- names(table(chromhmm$category)) 
+
+# select only EA, EPo, EPr, and Sil
+chromhmm <- chromhmm %>% filter(category %in% c("EA", "EPo", "EPr", "Sil"))
+```
+
+
+
+```{r}
+chromhmm_interaction <- function(cell_type_B, chromosome){
+
+  
+  chromhmm <- filter(chromhmm, cell_type == cell_type_B & chr == chromosome)
+ apply(data.frame(split_oe) %>% filter(chr == chromosome & cell_type == cell_type_B), 1, function(x) {
+    aux1 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start == as.numeric(x["start"]) & chromhmm$start == as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # same interacting region
+    aux2 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start > as.numeric(x["start"]) & chromhmm$start < as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # start position of chromhmm between the start and end position of the interacting region
+    aux3 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$end > as.numeric(x["start"]) & chromhmm$end < as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # # end position of chromhmm between the start and end position of the interacting region
+    aux4 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start > as.numeric(x["start"]) & chromhmm$end < as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # chromhmm within the interacting region
+    aux5 <- chromhmm[chromhmm$chr == as.character(x["chr"])
+                     & chromhmm$start < as.numeric(x["start"]) & chromhmm$end > as.numeric(x["end"])
+                     & chromhmm$cell_type == as.character(x["cell_type"] ),] # start of chromhmm before the start, end of chromhmm after the end of the interacting region
+    
+    aux <- rbind(aux1, aux2, aux3, aux4, aux5) %>% filter(!duplicated(.))
+    
+    aux$start[aux$start < as.numeric(x["start"])] <- as.numeric(x["start"])
+    aux$end[aux$end > as.numeric(x["end"]) ] <-  as.numeric(x["end"])
+    
+    aux$category <- factor(aux$category, levels = chromm_names,
+                                         labels = chromm_names)
+    
+    aux <- data.frame(id = as.character(x["id"]),
+                      chr_lichi = as.character(x["chr"]),
+                      start_lichi = as.numeric(x["start"]),
+                      end_lichi = as.numeric(x["end"]),
+                      aux)
+    
+    return(aux)
+  } ) %>% bind_rows()
+  
+}
+
+chromhmm_interaction_all <- apply(data.frame(names(table(chromhmm$chr))), 1, function(x){
+  
+  chromhmm_interaction_HSC <- chromhmm_interaction("HSC", x)
+    print(paste(x, "HSC \n "))
+    chromhmm_interaction_PreProB <- chromhmm_interaction("PrePro-B", x)
+    print(paste(x, "PreProB \n "))
+    chromhmm_interaction_ProB <- chromhmm_interaction("Pro-B", x)
+    print(paste(x, "ProB \n "))
+    chromhmm_interaction_PreB <- chromhmm_interaction("Pre-B", x)
+     print(paste(x, "PreB \n "))
+    chromhmm_interaction_transB <- chromhmm_interaction("Trans-B", x)
+     print(paste(x, "transB \n "))
+    chromhmm_interaction_nB <- chromhmm_interaction("nB", x)
+     print(paste(x, "nB \n "))
+    chromhmm_interaction_GCB <- chromhmm_interaction("GCB", x)
+     print(paste(x, "GCB \n "))
+    chromhmm_interaction_memB <- chromhmm_interaction("Mem-B", x)
+     print(paste(x, "memB \n "))
+    chromhmm_interaction_PC <- chromhmm_interaction("Plasma", x)
+     print(paste(x, "PC \n "))
+     
+    chromhmm_interaction <- rbind(chromhmm_interaction_HSC, chromhmm_interaction_PreProB, 
+                                  chromhmm_interaction_ProB,
+          chromhmm_interaction_PreB, chromhmm_interaction_transB,
+          chromhmm_interaction_nB, chromhmm_interaction_GCB,
+          chromhmm_interaction_memB, chromhmm_interaction_PC)
+    return(chromhmm_interaction)
+    
+  
+}) %>% bind_rows()
+  print("chromhmm into interactions!")
+
+```
+
+
+```{r}
+chromhmm_interaction_all$id_oe <- paste0(chromhmm_interaction_all$chr, ":", chromhmm_interaction_all$start, "-",
+                                         chromhmm_interaction_all$end)
+chromhmm_interaction_all$id_oe  <- match(chromhmm_interaction_all$id_oe, unique(chromhmm_interaction_all$id_oe) ) + as.numeric(max(chromhmm_interaction_all$id))
+
+
+
+save(chromhmm_interaction_all, file = "/home/acost1/BALL_project/results/gnn/chromhmm_interaction_all_updated.rds")
+```
+
+```{r}
+load("/home/acost1/BALL_project/results/gnn/chromhmm_interaction_all_updated.rds")
+
+summary(chromhmm_interaction_all$id_oe)
+summary(edge_file$ID_2)
+```
+
+```{r}
+tapply(chromhmm_interaction_all$end - chromhmm_interaction_all$start, 
+       chromhmm_interaction_all$cell_type, 
+       summary)
+```
+
+Build id_bed
+
+```{r}
+load("/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit_updated.rds")
+
+id_bed_split <- rbind(filter(id_bed, type == "B"),
+chromhmm_interaction_all %>% 
+  mutate(expression = NA, type = "OE", id_oe = factor(id_oe)) %>%
+  dplyr::select(id_oe, category, chr, start, end, expression, cell_type, type) %>%
+  dplyr::rename(id = id_oe, name_id = category, seqnames = chr) )
+
+
+```
+
+
+Build edge file
+
+```{r}
+load("/home/acost1/BALL_project/results/gnn/edge_file_notsplit_updated.rds")
+
+edge_file_split <- merge(edge_file, chromhmm_interaction_all,
+                          by.x = c("ID_2", "cell_type"),
+                          by.y = c("id", "cell_type"),
+                          all.x = TRUE)
+edge_file_split$seqnames2[!is.na(edge_file_split$chr)] <- edge_file_split$chr[!is.na(edge_file_split$chr)]
+edge_file_split$start2[!is.na(edge_file_split$start)] <- edge_file_split$start[!is.na(edge_file_split$start)]
+edge_file_split$end2[!is.na(edge_file_split$end)] <- edge_file_split$end[!is.na(edge_file_split$end)] 
+edge_file_split$ID_2[!is.na(edge_file_split$id_oe)] <- edge_file_split$id_oe[!is.na(edge_file_split$id_oe)] 
+
+edge_file_split$int[!is.na(edge_file_split$id_oe)] <- "B_OE"
+edge_file_split$int[is.na(edge_file_split$id_oe)] <- "B_B"
+
+edge_file_split <- edge_file_split %>% dplyr::select(seqnames1, start1, end1, ID_1, seqnames2, start2, end2, ID_2, chicago_score, cell_type, int)
+```
+
+
+```{r}
+length(unique(id_bed_split$id))
+
+nrow(edge_file_split)
+
+edge_file
+```
+
+
+```{r}
+id_bed$id <- as.factor(id_bed$id)
+# n = 494,268
+write.table(id_bed_split, file = "/home/acost1/BALL_project/results/gnn/seq_bed_file_split.bed", col.names = FALSE, row.names = FALSE,
+            sep = "\t", quote = FALSE)
+
+# n = 793,633
+write.csv(edge_file_split %>% dplyr::select(-int), file = "/home/acost1/BALL_project/results/gnn/edge_file_split.csv", row.names = FALSE)
+
+
+save(id_bed_split, file = "/home/acost1/BALL_project/results/gnn/seq_bed_file_split.rds")
+save(edge_file_split, file = "/home/acost1/BALL_project/results/gnn/edge_file_split.rds")
+```
+
+```{r}
+inter_annotated_gene <- edge_file_split
+
+n_inter_celltype <- inter_annotated_gene %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+plot_interactions_split <- inter_annotated_gene %>% group_by(cell_type, int) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  ggplot(aes(x=cell_type, y=n, fill=int)) +
+  geom_bar(stat="identity") +
+  geom_text(aes(label=n), size = 3, position = position_stack(vjust = 0.5), color="white") +
+  scale_fill_brewer(palette="Paired") +
+  ylim(0, max(rep(n_inter_celltype$n, each = 2)) + 10000) + 
+  geom_label(aes(y = rep(n_inter_celltype$n, each = 2), label=rep(n_inter_celltype$n, each = 2)), vjust=-0.5, color="black", alpha=0) + 
+  guides(fill=guide_legend(title="Interaction type")) + 
+  ylab("# interactions") + xlab("")
+
+
+
+
+n_nodes_celltype <- id_bed_split %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+
+plot_nodes_split <- id_bed_split %>% group_by(cell_type, type) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  ggplot(aes(x=cell_type, y=n, fill=type)) +
+  geom_bar(stat="identity") +
+  geom_text(aes(label=n), size = 3, position = position_stack(vjust = 0.5), color="white") +
+  ylim(0, max(rep(n_inter_celltype$n, each = 2)) + 10000) + 
+  geom_label(aes(y = rep(n_nodes_celltype$n, each = 2), label=rep(n_nodes_celltype$n, each = 2)), vjust=-0.5, color="black", alpha=0) + 
+  guides(fill=guide_legend(title="Node type")) + 
+  ylab("# nodes") + xlab("")
+
+
+ggarrange(plot_interactions_split, plot_nodes_split, ncol = 2)
+```
+
+```{r}
+inter_baits <- id_bed_split %>% filter(type == "B") %>%
+                filter(!duplicated(.))
+
+
+inter_baits$n_genes <- sapply(strsplit(inter_baits$name_id, ","), function(x) length(x))
+inter_baits$n_genes_c <- NA
+inter_baits$n_genes_c[inter_baits$n_genes == 1] <- "1 gene"
+inter_baits$n_genes_c[inter_baits$n_genes == 2] <- "2 genes"
+inter_baits$n_genes_c[inter_baits$n_genes > 2] <- "> 2 genes"
+inter_baits$n_genes_c <- factor(inter_baits$n_genes_c, levels = c("1 gene", "2 genes", "> 2 genes"),
+                                                   labels = c("1 gene", "2 genes", "> 2 genes") )
+
+n_nodes_celltype <- rbind(inter_baits) %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+plot_genes_nodes_split <- inter_baits %>% group_by(cell_type, n_genes_c) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  group_by(cell_type) %>% mutate(perc = n / sum(n), n_total = sum(n)) %>%
+  ggplot(aes(x=cell_type, y=perc, fill=n_genes_c, label = scales::percent(round(perc,3)) ))  +
+  geom_bar(stat="identity") +
+  geom_text(size = 3, position = position_stack(vjust = 0.5)) +
+  geom_label(aes(y = 1, label=n_total), vjust=-0.5, color="black", alpha=0) + 
+  ylim(0,1.5) +
+  scale_y_continuous(labels = scales::percent) +
+  guides(fill=guide_legend(title="Number of genes")) + 
+  ylab("") + xlab("")
+```
+
+
+check how many OE have multiple EA, EPr, or EPo and Sil  --> plot
+
+```{r}
+inter_OE <- id_bed_split %>% filter(type == "OE")
+
+n_nodes_celltype <- rbind(inter_OE) %>% group_by(cell_type) %>% dplyr::summarise(n = n())
+
+plot_OE_nodes_split <- inter_OE %>% group_by(cell_type, name_id) %>% dplyr::summarise(n = n()) %>%
+  ungroup() %>%
+  group_by(cell_type) %>% mutate(perc = n / sum(n), n_total = sum(n)) %>%
+  ggplot(aes(x=cell_type, y=perc, fill=name_id, label = scales::percent(round(perc,3)) ))  +
+  geom_bar(stat="identity") +
+  geom_text(size = 3, position = position_stack(vjust = 0.5)) +
+  scale_fill_brewer(palette = "Paired" ) +
+  geom_label(aes(y = 1, label=n_total), vjust=-0.5, color="black", alpha=0) + 
+  ylim(0,1.5) +
+  scale_y_continuous(labels = scales::percent) +
+  guides(fill=guide_legend(title="Cis-regulatory elements")) + 
+  ylab("") + xlab("")
+
+```
+
+
+```{r}
+ggarrange(plot_genes_nodes_split, plot_OE_nodes_split, ncol = 2)
+```
+
+
+Other code
+```{r}
+require("TxDb.Hsapiens.UCSC.hg38.knownGene")
+
+txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene
+genes.txdb <- genes(txdb, single.strand.genes.only=FALSE)
+
+genes.txdb[genes.txdb$gene_id %in% genes_ensembl$entrezgene_id]
+
+promoters(genes(txdb), upstream = 1500, downstream = 500)
+
+promoters_txdb <- promoters(genes.txdb[genes.txdb$gene_id %in% genes_ensembl$entrezgene_id])
+promoters_txdb
+
+
+genes_ensembl <- biomaRt::getBM(filters= "ensembl_gene_id",
+                                attributes = c("ensembl_gene_id", "entrezgene_id", "start_position", "chromosome_name", "gene_biotype"), 
+                                values = unique(geneM_bait1$ensembl_gene_id), 
+                                mart = mart) 
+genes_ensembl <- genes_ensembl[!duplicated(genes_ensembl$ensembl_gene_id),]
+promoters_txdb <- promoters(genes.txdb[names(genes.txdb) %in% genes_ensembl$entrezgene_id])
+
+```
+
+  
+ 
+
+check once more the num of interactions and baits
+
+build 2 files
+
+
+
+
+
+make another data.frame with the splits of OE 
+
+
+- without any split in the B and OE
+- with split in B and OE
+
+
+
+
+

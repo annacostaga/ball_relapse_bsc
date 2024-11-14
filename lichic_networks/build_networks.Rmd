@@ -34,7 +34,7 @@ We have to create these two objects:
 
 ```{r}
 # Load data.frame with interactions between the two fragments 
-load("/home/acost1/BALL_project/results/lichi_chromhmm/figures_biola/inter_annotated_gene_updated.rds") # n = 1.253.808  --> 1,303,771
+load("/home/acost1/BALL_project/results/lichi_chromhmm/inter_annotated_gene_updated.rds") # n = 1.253.808  --> 1,303,771
 ```
 
 
@@ -420,7 +420,7 @@ length(unique(c(bait1_id, bait2_id))) # 18740
 
 inter_baits <- rbind( bait1, bait2) %>%
                 filter(!duplicated(.))
-unique(inter_baits$id_bait) %>% length() # only 1870 regions
+unique(inter_baits$id_bait) %>% length() # only 18740 regions
 
 
 
@@ -889,7 +889,7 @@ summary(as.numeric(gene1_bait1$end) - as.numeric(gene1_bait1$start) )
 Split the OE into ChromHMM tracks
 
 ```{r}
-load("/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit.rds")
+load("/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit_updated.rds")
 split_oe <- id_bed %>% filter(type == "OE")  %>% dplyr::select(id, seqnames, start, end, cell_type) %>% 
               filter(!duplicated(.)) %>%
               dplyr::rename(chr = seqnames)
@@ -1123,15 +1123,15 @@ edge_file
 ```{r}
 id_bed$id <- as.factor(id_bed$id)
 # n = 494,268
-write.table(id_bed_split, file = "/home/acost1/BALL_project/results/gnn/seq_bed_file_split.bed", col.names = FALSE, row.names = FALSE,
+write.table(id_bed_split, file = "/home/acost1/BALL_project/results/gnn/seq_bed_file_split_updated.bed", col.names = FALSE, row.names = FALSE,
             sep = "\t", quote = FALSE)
 
 # n = 793,633
-write.csv(edge_file_split %>% dplyr::select(-int), file = "/home/acost1/BALL_project/results/gnn/edge_file_split.csv", row.names = FALSE)
+write.csv(edge_file_split %>% dplyr::select(-int), file = "/home/acost1/BALL_project/results/gnn/edge_file_split_updated.csv", row.names = FALSE)
 
 
-save(id_bed_split, file = "/home/acost1/BALL_project/results/gnn/seq_bed_file_split.rds")
-save(edge_file_split, file = "/home/acost1/BALL_project/results/gnn/edge_file_split.rds")
+save(id_bed_split, file = "/home/acost1/BALL_project/results/gnn/seq_bed_file_split_updated.rds")
+save(edge_file_split, file = "/home/acost1/BALL_project/results/gnn/edge_file_split_updated.rds")
 ```
 
 ```{r}
@@ -1254,7 +1254,7 @@ promoters_txdb <- promoters(genes.txdb[names(genes.txdb) %in% genes_ensembl$entr
   
  
 
-check once more the num of interactions and baits
+check once more the núm. of interactions and baits
 
 build 2 files
 

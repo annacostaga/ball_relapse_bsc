@@ -28,18 +28,18 @@ annotate_interactions <- function (interactions, annotation, ...) {
       interactions@elementMetadata[is.na(interactions@elementMetadata[, 
                                                                       "bait_1"]), "bait_1"] <- "."
       interactions <- annotate_BOE(interactions)
-      cond <- ((interactions$ID_1 > interactions$ID_2) & 
-                 interactions$int == "B_B") | ((interactions$ID_1 < 
-                                                  interactions$ID_2) & interactions$int == "OE_B")
-      a1 <- interactions@anchor1[cond]
-      a2 <- interactions@anchor2[cond]
-      interactions@anchor1[cond] <- a2
-      interactions@anchor2[cond] <- a1
-      cols <- sort(grep("_", colnames(S4Vectors::elementMetadata(interactions[cond]))[1:4], 
-                        value = T))
-      S4Vectors::elementMetadata(interactions[cond])[cols] <- S4Vectors::elementMetadata(interactions[cond])[cols[c(rbind(seq(2, 
-                                                                                                                              length(cols), 2), seq(1, length(cols), 2)))]]
-      interactions <- annotate_BOE(interactions)
+      # cond <- ((interactions$ID_1 > interactions$ID_2) & 
+      #            interactions$int == "B_B") | ((interactions$ID_1 < 
+      #                                             interactions$ID_2) & interactions$int == "OE_B")
+      # a1 <- interactions@anchor1[cond]
+      # a2 <- interactions@anchor2[cond]
+      # interactions@anchor1[cond] <- a2
+      # interactions@anchor2[cond] <- a1
+      # cols <- sort(grep("_", colnames(S4Vectors::elementMetadata(interactions[cond]))[1:4], 
+      #                   value = T))
+      # S4Vectors::elementMetadata(interactions[cond])[cols] <- S4Vectors::elementMetadata(interactions[cond])[cols[c(rbind(seq(2, 
+      #                                                                                                                         length(cols), 2), seq(1, length(cols), 2)))]]
+      # interactions <- annotate_BOE(interactions)
       # param <- getParameters(interactions)
       # param$annotate <- c(annotation_file = normalizePath(annotation_file))
       # interactions <- setParameters(interactions, param)

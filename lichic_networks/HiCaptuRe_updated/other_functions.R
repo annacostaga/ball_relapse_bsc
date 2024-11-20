@@ -3,8 +3,7 @@
 #' This function takes a genome installed and generates its digest for a given restriction enzyme
 
 
-digest_genome <- function(genome="GRCh38",RE_name="hindIII",motif="AAGCTT",cut_position=1,select_chr=c(1:22,"X","Y"),PAR_mask=T,PAR_file=NULL,...)
-{
+digest_genome <- function(genome="GRCh38",RE_name="hindIII",motif="AAGCTT",cut_position=1,select_chr=c(1:22,"X","Y"),PAR_mask=T,PAR_file=NULL,...){
   genome_name <- genome
   ## Load reference genome from installed ones
   genome <-  tryCatch({

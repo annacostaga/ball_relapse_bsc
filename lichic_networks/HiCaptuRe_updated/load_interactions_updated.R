@@ -1,6 +1,5 @@
 
-load_interactions <- function(file,washU_seqname="chr",...)
-{
+load_interactions <- function(file,washU_seqname="chr",...){
   
   if (!file.exists(file))
   {
@@ -252,22 +251,7 @@ load_interactions <- function(file,washU_seqname="chr",...)
       
       gi <- annotate_BOE(gi)
       
-      
-      p(sprintf("Sorting"))
-      
-      ## Sorting interactions P_P
-      cond <- ((gi$ID_1 > gi$ID_2) & gi$int == "B_B") | ((gi$ID_1 < gi$ID_2) & gi$int == "OE_B")
-      
-      a1 <- gi@anchor1[cond]
-      a2 <- gi@anchor2[cond]
-      
-      gi@anchor1[cond] <- a2
-      gi@anchor2[cond] <- a1
-      
-      
-      cols <- sort(grep("_",colnames(S4Vectors::elementMetadata(gi[cond]))[1:4],value = T))
-      S4Vectors::elementMetadata(gi[cond])[cols] <- S4Vectors::elementMetadata(gi[cond])[cols[c(rbind(seq(2,length(cols),2),seq(1,length(cols),2)))]]
-      
+      return(gi)
       # gi@elementMetadata <- gi@elementMetadata[,-which(colnames(gi@elementMetadata) %in% c("counts"))]
       
       # p(sprintf("Finishing"))
@@ -276,7 +260,7 @@ load_interactions <- function(file,washU_seqname="chr",...)
       # 
       # final <- final[order(final$ID_1,final$ID_2)]
       # 
-      return(gi)
+      
     
   }
  }

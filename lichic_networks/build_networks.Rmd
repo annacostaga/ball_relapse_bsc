@@ -38,7 +38,9 @@ load("/home/acost1/BALL_project/results/lichi_chromhmm/inter_annotated_gene_upda
 ```
 
 
-We have 1.253.808 significant interactions (chicago >=5 in total), and 114.441 nodes: 21.299 baits, and 179.044 OE.
+
+# STEP 1:
+We have 1.303.771 significant interactions (chicago >=5 in total), and 200.343 nodes: 21.299 baits, and 179.044 OE.
 
 These is the number of interactions and nodes per stage and type (for interactions: B_B and B_OE; for nodes: B and OE)
 
@@ -81,20 +83,30 @@ plot_nodes <- rbind(inter_baits, inter_OE) %>% group_by(cell_type, node_class) %
   ylab("# nodes") + xlab("")
 
 
-ggarrange(plot_interactions, plot_nodes, ncol = 2)
 
+png("/home/acost1/BALL_project/results/gnn/figures/interactions_nodes_step1.png", width = 50, height = 30, res = 200, units = "cm")
+ggarrange(plot_interactions, plot_nodes, ncol = 2)
+dev.off()
 ```
 
 ```{r}
+# Number of interactions
 nrow(inter_annotated_gene)
 
+# Number of Baits:
 length(unique(inter_baits$id_bait)) 
+
+# Numer of OEs
 length(unique(inter_OE$id_bait))
 
+
+# Number of nodes
 length(unique(c(inter_annotated_gene$ID_1, inter_annotated_gene$ID_2)))
 ```
 
 
+
+See the distributions of the bin lengths for Baits and other ends
 ```{r}
 inter_baits <- rbind( dplyr::select(inter_annotated_gene, ID_1, node.class1, cell_type, start1, end1) %>% 
                         dplyr::rename(id_bait = ID_1, node_class = node.class1, start = start1, end = end1),
@@ -113,14 +125,15 @@ inter_elements <- rbind(inter_baits, inter_OE)
 
 tapply(inter_elements$length, inter_elements$node_class, summary)
 
-png("/home/acost1/BALL_project/scripts_analysis/gnn/bin_length2.png")
-boxplot(inter_elements$length ~ inter_elements$node_class, xlab = "", ylab = "bin length")
-dev.off()
+#png("/home/acost1/BALL_project/scripts_analysis/gnn/bin_length2.png")
+#boxplot(inter_elements$length ~ inter_elements$node_class, xlab = "", ylab = "bin length")
+#dev.off()
 ```
 
 
 
 
+# STEP 2:
 - Keep only the OE that contain EA, EPr, EPo, and Silencers
 - Remove the non-annotated B
 
@@ -133,12 +146,8 @@ inter_annotated_gene <- inter_annotated_gene %>% filter(node.class2 == "B" | (no
 ```
 
 
-```{r}
 
-```
-
-
-Now, we have 586.019 significant interactions (chicago >=5 in total), and 114.441 nodes: 18.740 baits, and 95.701 OE.
+Now, we have 632.352 significant interactions (chicago >=5 in total), and 114.441 nodes: 18.740 baits, and 95.701 OE.
 
 These is the number of interactions and nodes per stage and type (for interactions: B_B and B_OE; for nodes: B and OE)
 
@@ -181,15 +190,24 @@ plot_nodes <- rbind(inter_baits, inter_OE) %>% group_by(cell_type, node_class) %
   ylab("# nodes") + xlab("")
 
 
+png("/home/acost1/BALL_project/results/gnn/figures/interactions_nodes_step2.png", width = 50, height = 30, res = 200, units = "cm")
 ggarrange(plot_interactions, plot_nodes, ncol = 2)
+dev.off()
 ```
 
 
 ```{r}
+# Number of interactions
 nrow(inter_annotated_gene)
-length(unique(inter_baits$id_bait))
+
+# Number of Baits:
+length(unique(inter_baits$id_bait)) 
+
+# Numer of OEs
 length(unique(inter_OE$id_bait))
 
+
+# Number of nodes
 length(unique(c(inter_annotated_gene$ID_1, inter_annotated_gene$ID_2)))
 ```
 
@@ -289,7 +307,9 @@ plot_OE_nodes  <- inter_OE %>% group_by(cell_type, cis_regulatory) %>% dplyr::su
 
 
 ```{r}
+png("/home/acost1/BALL_project/results/gnn/figures/nodes_step2.png", width = 50, height = 30, res = 200, units = "cm")
 ggarrange(plot_genes_nodes, plot_OE_nodes, ncol = 2)
+dev.off()
 ```
 
 
@@ -298,9 +318,9 @@ ggarrange(plot_genes_nodes, plot_OE_nodes, ncol = 2)
 ```
 
 
-NON-SPLIT NODE
+# STEP 3: NON-SPLIT NODE
 
-put the expression (with ensembl code, id) 
+## put the expression (with ensembl code, id) 
   - if multiple genes in one bait, median of the expression
 
 
@@ -313,15 +333,15 @@ bait1_id <- unique(bait1$id_bait)
 bait2_id <- unique(bait2$id_bait) 
 
 
-intersect(bait1_id, bait2_id) %>% length() # both regions: 13150 Baits
-bait1_id[!bait1_id %in% bait2_id] %>% length() # only region 1: 4838 baits
-bait2_id[!bait2_id %in% bait1_id] %>% length() # only region 1: 752 baits
+intersect(bait1_id, bait2_id) %>% length() # both regions: 14.022 Baits
+bait1_id[!bait1_id %in% bait2_id] %>% length() # only region 1: 4.164 baits
+bait2_id[!bait2_id %in% bait1_id] %>% length() # only region 1: 554 baits
 
 
-length(unique(c(bait1_id, bait2_id))) # 18740
+length(unique(c(bait1_id, bait2_id))) # 18.740
 
 inter_baits <- rbind( bait1, bait2) %>%
-                filter(!duplicated(.)) # only 1870 regions
+                filter(!duplicated(.)) # only 18740 regions
 
 
 
@@ -342,16 +362,19 @@ inter_baits <- apply(data.frame(inter_baits), 1, function(x){
 inter_baits$gene_type <- ifelse(startsWith(inter_baits$bait, "ENSG") == TRUE, "ensembl", "symbol")
 
 # hgnc_symbol to ensembl_gene_id (those with hgnc_symbol)
-mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
+# mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
 genes_ensembl <- biomaRt::getBM(filters= "hgnc_symbol",
                                 attributes = c("hgnc_symbol", "ensembl_gene_id", "start_position", "chromosome_name", "gene_biotype"), 
                                 values = unique(inter_baits$bait), 
                                 mart = mart) # n = 23836 --> unique = 21224
+# NOW n = 23.781 ---> unique ensembl id = 23.779, unique symbol = 21.191
 
 # remove genes that are not annotated in chr 1:23, X, Y (n = 21281) --> unique = 21224 (removed n = 2555, unique = 0)
+# NOW remove genes that are not annotated in chr 1:23, X, Y (n = 21247) --> unique = 21190 (removed n = 2534, unique = 1)
 genes_ensembl <- filter(genes_ensembl, chromosome_name %in% names(table(inter_annotated_gene$seqnames1)) ) 
 
 # remove genes that have hgnc_symbol duplicated (n = 21167) --> unique = 21167  (removed n = 114, unique = 57)
+# NOW remove genes that have hgnc_symbol duplicated (n = 21133) --> unique = 21133  (removed n = 114, unique = 57)
 hgnc_symbol_dupl <- genes_ensembl$hgnc_symbol[duplicated(genes_ensembl$hgnc_symbol)]
 genes_ensembl <- filter(genes_ensembl, !hgnc_symbol %in% hgnc_symbol_dupl )
 
@@ -363,7 +386,8 @@ inter_baits_simple <- merge(inter_baits, genes_ensembl, by.x = "bait", by.y = "h
 inter_baits_simple$ensembl_gene_id[inter_baits_simple$gene_type == "ensembl"] <- inter_baits_simple$bait[inter_baits_simple$gene_type == "ensembl"]
 
 
-#- Couldn't find 40 gene ensembl id 
+#- Couldn't find 407 gene ensembl id 
+# - NOW: Couldn't find 445 gene ensembl id 
 rm_bait <- inter_baits_simple$bait[is.na(inter_baits_simple$ensembl_gene_id)]
 inter_baits_simple <- inter_baits_simple[!is.na(inter_baits_simple$ensembl_gene_id),] 
 
@@ -393,9 +417,9 @@ NormByTMM_long <- NormByTMM_long %>% group_by(genes, cell_type_c) %>%
                 cell_type = cell_type_c)
 NormByTMM_long$cell_type[NormByTMM_long$cell_type == "nB"] = "nB1Mnew"
 
-NormByTMM_long$cell_type <- factor(NormByTMM_long$cell_type, 
-                                         levels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB1Mnew", "GCB", "memB", "PC"),
-                                         labels = c("HSC", "PrePro-B", "Pro-B", "Pre-B", "Trans-B", "nB", "GCB", "Mem-B", "Plasma"))
+# NormByTMM_long$cell_type <- factor(NormByTMM_long$cell_type, 
+#                                         levels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB1Mnew", "GCB", "memB", "PC"),
+#                                         labels = c("HSC", "PrePro-B", "Pro-B", "Pre-B", "Trans-B", "nB", "GCB", "Mem-B", "Plasma"))
 
 
 
@@ -411,9 +435,9 @@ bait1_id <- unique(bait1$id_bait)
 bait2_id <- unique(bait2$id_bait) 
 
 
-intersect(bait1_id, bait2_id) %>% length() # both regions: 13150 Baits
-bait1_id[!bait1_id %in% bait2_id] %>% length() # only region 1: 4838 baits
-bait2_id[!bait2_id %in% bait1_id] %>% length() # only region 1: 752 baits
+intersect(bait1_id, bait2_id) %>% length() # both regions: 14.022 Baits
+bait1_id[!bait1_id %in% bait2_id] %>% length() # only region 1: 4.164 baits
+bait2_id[!bait2_id %in% bait1_id] %>% length() # only region 2: 554 baits
 
 
 length(unique(c(bait1_id, bait2_id))) # 18740
@@ -445,7 +469,7 @@ inter_baits <- merge(inter_baits, inter_baits_simple, by = c("id_bait", "bait"),
 # Merge the expression data with the combination of cell type (HSC) and gene (with ensemble id), from BAIT_1
 inter_baits <- merge(inter_baits, NormByTMM_long, by.x = c("ensembl_gene_id", "cell_type"), by.y = c("B.id1", "cell_type"), all.x = TRUE)
 
-# n = 4, not found expression
+# NOW n = 4, not found expression
 # filter(inter_baits, is.na(expression)) %>% dplyr::select(ensembl_gene_id) %>% filter(!duplicated(.))
 rm_expression <- inter_baits[is.na(inter_baits$expression),]
 inter_baits_all <- filter(inter_baits, !is.na(expression))
@@ -465,9 +489,9 @@ bait1_id <- unique(bait1$id_bait)
 bait2_id <- unique(bait2$id_bait) 
 
 
-intersect(bait1_id, bait2_id) %>% length() # both regions: 13150 Baits
-bait1_id[!bait1_id %in% bait2_id] %>% length() # only region 1: 4838 baits
-bait2_id[!bait2_id %in% bait1_id] %>% length() # only region 1: 752 baits
+intersect(bait1_id, bait2_id) %>% length() # both regions: 14.022 Baits
+bait1_id[!bait1_id %in% bait2_id] %>% length() # only region 1: 4.164 baits
+bait2_id[!bait2_id %in% bait1_id] %>% length() # only region 2: 554 baits
 
 
 all_baits <- unique(c(bait1_id, bait2_id))
@@ -478,6 +502,12 @@ all_baits[all_baits %in% unique(as.numeric(inter_baits_simple$id_bait) ) ] %>% l
 
 
 ```{r}
+# Select only the baits with know ensembl id and expression (they come from inter_baits object)
+
+aux <- inter_annotated_gene
+
+
+# - for baits region
 inter_baits$id_bait <- as.numeric(inter_baits$id_bait)
 
 inter_annotated_gene <- merge(inter_annotated_gene, 
@@ -486,18 +516,27 @@ inter_annotated_gene <- merge(inter_annotated_gene,
                               by.y = c("id_bait", "cell_type"),
                               all.x = TRUE)
 
-inter_annotated_gene <- filter(inter_annotated_gene, !is.na(expression) ) # n = 497.157
+inter_annotated_gene <- filter(inter_annotated_gene, !is.na(expression) ) # n = 497.157 => 626.087
 
 
+# - For OE region
 inter_annotated_gene <- merge(inter_annotated_gene, 
                               inter_baits,
                               by.x = c("ID_2", "cell_type"), 
                               by.y = c("id_bait", "cell_type"),
                               all.x = TRUE)
+
+
 inter_annotated_gene <- filter(inter_annotated_gene, !(is.na(expression.y) & node.class2 == "B") )
+
+filter(inter_annotated_gene, (is.na(expression.y) & node.class2 == "B") )
 
 ```
 
+
+
+
+## Plots
 
 ```{r}
 n_inter_celltype <- inter_annotated_gene %>% group_by(cell_type) %>% dplyr::summarise(n = n())
@@ -538,14 +577,23 @@ plot_nodes_notsplit <- rbind(inter_baits, inter_OE) %>% group_by(cell_type, node
   ylab("# nodes") + xlab("")
 
 
+png("/home/acost1/BALL_project/results/gnn/figures/interactions_nodes_step3.png", width = 50, height = 30, res = 200, units = "cm")
 ggarrange(plot_interactions_notsplit, plot_nodes_notsplit, ncol = 2)
+dev.off()
 ```
 
 ```{r}
+# Number of interactions
 nrow(inter_annotated_gene)
-length(unique(inter_baits$id_bait))
+
+# Number of Baits:
+length(unique(inter_baits$id_bait)) 
+
+# Numer of OEs
 length(unique(inter_OE$id_bait))
 
+
+# Number of nodes
 length(unique(c(inter_annotated_gene$ID_1, inter_annotated_gene$ID_2)))
 ```
 
@@ -644,10 +692,12 @@ plot_OE_nodes2  <- inter_OE %>% group_by(cell_type, cis_regulatory) %>% dplyr::s
 
 
 ```{r}
+png("/home/acost1/BALL_project/results/gnn/figures/nodes_step3.png", width = 50, height = 30, res = 200, units = "cm")
 ggarrange(plot_genes_nodes2, plot_OE_nodes2, ncol = 2)
+dev.off()
 ```
 
-build 2 files
+## build 2 files
 
 
 ```{r}
@@ -730,6 +780,9 @@ save(edge_file, file = "/home/acost1/BALL_project/results/gnn/edge_file_notsplit
 
 ```
 
+
+
+
 # Subset
 ```{r}
 load("/home/acost1/BALL_project/results/gnn/seq_bed_file_notsplit.rds")
@@ -766,7 +819,7 @@ save(edge_file, file = "/home/acost1/BALL_project/results/gnn/edge_file_notsplit
 
 
 
-SPLIT NODES
+# STEP 4: SPLIT NODES
 
 split both B and OE, and recount the number of Interactions and baits
   - we should change the start and end
@@ -972,6 +1025,14 @@ chromm_names <- names(table(chromhmm$category))
 
 # select only EA, EPo, EPr, and Sil
 chromhmm <- chromhmm %>% filter(category %in% c("EA", "EPo", "EPr", "Sil"))
+
+
+table(chromhmm$cell_type)
+
+
+chromhmm$cell_type <- factor(chromhmm$cell_type, 
+                                       levels = c("HSC", "PrePro-B", "Pro-B", "Pre-B", "Trans-B", "nB", "GCB", "Mem-B", "Plasma"),
+                                        labels = c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB1Mnew", "GCB", "memB", "PC"))
 ```
 
 
@@ -1006,6 +1067,8 @@ chromhmm_interaction <- function(cell_type_B, chromosome){
     aux$category <- factor(aux$category, levels = chromm_names,
                                          labels = chromm_names)
     
+    # print(aux)
+    
     aux <- data.frame(id = as.character(x["id"]),
                       chr_lichi = as.character(x["chr"]),
                       start_lichi = as.numeric(x["start"]),
@@ -1021,21 +1084,21 @@ chromhmm_interaction_all <- apply(data.frame(names(table(chromhmm$chr))), 1, fun
   
   chromhmm_interaction_HSC <- chromhmm_interaction("HSC", x)
     print(paste(x, "HSC \n "))
-    chromhmm_interaction_PreProB <- chromhmm_interaction("PrePro-B", x)
+    chromhmm_interaction_PreProB <- chromhmm_interaction("PreProB", x)
     print(paste(x, "PreProB \n "))
-    chromhmm_interaction_ProB <- chromhmm_interaction("Pro-B", x)
+    chromhmm_interaction_ProB <- chromhmm_interaction("ProB", x)
     print(paste(x, "ProB \n "))
-    chromhmm_interaction_PreB <- chromhmm_interaction("Pre-B", x)
+    chromhmm_interaction_PreB <- chromhmm_interaction("PreB", x)
      print(paste(x, "PreB \n "))
-    chromhmm_interaction_transB <- chromhmm_interaction("Trans-B", x)
+    chromhmm_interaction_transB <- chromhmm_interaction("immtransB", x)
      print(paste(x, "transB \n "))
-    chromhmm_interaction_nB <- chromhmm_interaction("nB", x)
+    chromhmm_interaction_nB <- chromhmm_interaction("nB1Mnew", x)
      print(paste(x, "nB \n "))
     chromhmm_interaction_GCB <- chromhmm_interaction("GCB", x)
      print(paste(x, "GCB \n "))
-    chromhmm_interaction_memB <- chromhmm_interaction("Mem-B", x)
+    chromhmm_interaction_memB <- chromhmm_interaction("memB", x)
      print(paste(x, "memB \n "))
-    chromhmm_interaction_PC <- chromhmm_interaction("Plasma", x)
+    chromhmm_interaction_PC <- chromhmm_interaction("PC", x)
      print(paste(x, "PC \n "))
      
     chromhmm_interaction <- rbind(chromhmm_interaction_HSC, chromhmm_interaction_PreProB, 
@@ -1134,6 +1197,25 @@ save(id_bed_split, file = "/home/acost1/BALL_project/results/gnn/seq_bed_file_sp
 save(edge_file_split, file = "/home/acost1/BALL_project/results/gnn/edge_file_split_updated.rds")
 ```
 
+
+
+
+```{r}
+# Number of interactions
+nrow(inter_annotated_gene)
+
+# Number of Baits:
+length(unique(inter_baits$id)) 
+
+# Numer of OEs
+length(unique(inter_OE$id))
+
+
+# Number of nodes
+length(unique(c(inter_annotated_gene$ID_1, inter_annotated_gene$ID_2)))
+```
+
+
 ```{r}
 inter_annotated_gene <- edge_file_split
 
@@ -1167,7 +1249,9 @@ plot_nodes_split <- id_bed_split %>% group_by(cell_type, type) %>% dplyr::summar
   ylab("# nodes") + xlab("")
 
 
+png("/home/acost1/BALL_project/results/gnn/figures/interactions_nodes_step4.png", width = 50, height = 30, res = 200, units = "cm")
 ggarrange(plot_interactions_split, plot_nodes_split, ncol = 2)
+dev.off()
 ```
 
 ```{r}
@@ -1223,8 +1307,14 @@ plot_OE_nodes_split <- inter_OE %>% group_by(cell_type, name_id) %>% dplyr::summ
 
 
 ```{r}
+png("/home/acost1/BALL_project/results/gnn/figures/nodes_step4.png", width = 50, height = 30, res = 200, units = "cm")
 ggarrange(plot_genes_nodes_split, plot_OE_nodes_split, ncol = 2)
+dev.off()
 ```
+
+
+
+
 
 
 Other code
@@ -1253,22 +1343,5 @@ promoters_txdb <- promoters(genes.txdb[names(genes.txdb) %in% genes_ensembl$entr
 
   
  
-
-check once more the núm. of interactions and baits
-
-build 2 files
-
-
-
-
-
-make another data.frame with the splits of OE 
-
-
-- without any split in the B and OE
-- with split in B and OE
-
-
-
 
 

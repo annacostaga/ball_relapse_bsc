@@ -55,14 +55,39 @@ data_overlap2 <- filter(inter_annotated, pair %in% interactions_overlap)
 data_overlap2 %>% group_by(pair) %>% summarise(id1 = length(unique(ID_1)),
                                                        id2 = length(unique(ID_2)))
 
+# - Number of genes/communities
+length(unique(inter_annotated$ID_1)) # n = 21.458
 
+# - Number of genes that interact with other genes
+inter_annotated_BB <- filter(inter_annotated, int == "B_B")
+length(unique(inter_annotated_BB$ID_1)) # n = 16.514
+
+# - Number of genes that interact with other genes this interaction is bidirectional
+inter_annotated_BB$ID_min <- pmin(inter_annotated_BB$ID_1, inter_annotated_BB$ID_2)
+inter_annotated_BB$ID_max <- pmax(inter_annotated_BB$ID_1, inter_annotated_BB$ID_2)
+
+inter_annotated_BB$pair <- paste(inter_annotated_BB$ID_min, inter_annotated_BB$ID_max, sep = "_")
+
+inter_annotated_BB$pair 
+interactions_overlap
+
+length(unique(inter_annotated_BB_bi$ID_1)) # n = 12.240
+
+
+# Number of all interactions between baits n = 64.977
+length(unique(inter_annotated_BB$pair))
+
+# Number of bidirectional interactions between baits n = 21.348
+inter_annotated_BB$pair[inter_annotated_BB$pair %in% interactions_overlap ] %>% unique() %>% length()
+
+# Number of unidirectional interactions between baits n = 43.629
+inter_annotated_BB$pair[!inter_annotated_BB$pair %in% interactions_overlap ] %>% unique() %>% length()
 
 ####################################################################################################################
 ### 3. Interactions from updated HiCaptuRE package and annotated with ChromHMM (only significant interactions)
 ####################################################################################################################
 
 load("/home/acost1/BALL_project/results/lichi_chromhmm/inter_annotated_gene_updated.rds") 
-
 
 
 # Find bidirectional interactions inside the edge_file of B_B
@@ -87,6 +112,26 @@ prova <- data_overlap %>% group_by(pair) %>% summarise(id1 = length(unique(ID_1)
 table(prova$id1)
 table(prova$id2)
 
+
+
+# Check how many genes we have, and how many of them have bidirectional interactions with other Baits
+
+# - Number of genes/communities
+number_genes <- tapply(inter_annotated_gene$ID_1, inter_annotated_gene$cell_type, function(x) length(unique(x)) )
+
+# - Number of genes that interact with other genes
+inter_annotated_BB <- filter(inter_annotated_gene, int == "B_B")
+number_genes_BB <- tapply(inter_annotated_BB$ID_1, inter_annotated_BB$cell_type, function(x) length(unique(x)) )
+
+# - Number of genes that interact with other genes this interaction is bidirectional
+inter_annotated_BB$ID_min <- pmin(inter_annotated_BB$ID_1, inter_annotated_BB$ID_2)
+inter_annotated_BB$ID_max <- pmax(inter_annotated_BB$ID_1, inter_annotated_BB$ID_2)
+
+inter_annotated_BB$pair <- paste(inter_annotated_BB$ID_min, inter_annotated_BB$ID_max, sep = "_")
+
+inter_annotated_BB_bi <- filter(inter_annotated_BB, pair %in% interactions_overlap)
+
+number_genes_BB_bi <- tapply(inter_annotated_BB_bi$ID_1, inter_annotated_BB_bi$cell_type, function(x) length(unique(x)) )
 
 
 ####################################################################################################################
@@ -143,7 +188,7 @@ table(prova$id2)
 
 
 ####################################################################################################################
-### 5. Interactions from GNN file NOT split
+### 5. Interactions from GNN file WITH split
 ####################################################################################################################
 
 load("/home/acost1/BALL_project/results/gnn/edge_file_split_updated.rds")
@@ -211,22 +256,41 @@ id_bed_split$caract[id_bed_split$type == "B"] <- "B"
 # Number of genes/communities
 tapply(edge_file_split$ID_1, edge_file_split$cell_type, function(x) length(unique(x)) )
 
-# igraph for a gene
+# igraph function for a gene
 gene_community_igraph <- function(gene_id, edge_file, id_bed_file, cell_type_subset){
-  edge_file <- dplyr::filter(edge_file, cell_type == cell_type_subset )%>%
-                select(ID_1, ID_2)
   
-  print(table(edge_file$cell_type))
+  # Edge file and id_bed file only for a specific cell_type_subset
+  edge_file <- dplyr::filter(edge_file, cell_type == cell_type_subset )%>%
+                select(ID_1, ID_2, int)
   
   id_bed_file <- filter(id_bed_file, cell_type == cell_type_subset) %>% select(id, name_id, caract)
   id_bed_file$id <- as.numeric(id_bed_file$id)
+  print("Step 1")
   
+  # Select only interactions from gene_id of interest
   edges_subset <- edge_file[edge_file$ID_1 %in% gene_id,]
+  
+  # Select all baits and other ends from the previous interactions
   id_subset <- id_bed_file[id_bed_file$id %in% unique(c(edges_subset$ID_1, edges_subset$ID_2) ),]
   
-  print("OK?")
+  
+  print("Step 2")
+  
+  # Check if other baits also interact with our gene_id of interest
+  id_otherB <- edges_subset$ID_2[edges_subset$int == "B_B"] %>% unique()
+  print(id_otherB)
+  
+  aux <- edge_file[edge_file$ID_1 %in% id_otherB,]
+  print(nrow(aux))
+  print("Step 3")
+  
+  # Add (if any) the other bidirectional interactions
+  if(nrow(aux[aux$ID_2 == gene_id,]) != 0){
+    edges_subset <- rbind(edges_subset, aux[aux$ID_2 == gene_id,] ) }
+  
   graph <- graph_from_data_frame(d = edges_subset, vertices = id_subset, directed = TRUE)
   
+  print("Step 4")
   
   # Plot the graph, using 'name_id' for visualization
   coul  <- brewer.pal(5, "Set1")
@@ -250,9 +314,9 @@ gene_community_igraph <- function(gene_id, edge_file, id_bed_file, cell_type_sub
   plot(
     graph,
     vertex.label = V(graph)$name_id, # Use 'name_id' for labels
-    edge.arrow.size = 0.01,          # Adjust arrow size
+    edge.arrow.size = 0.5,          # Adjust arrow size
     vertex.label.color="black", vertex.label.dist=1,
-    vertex.size=7,
+    vertex.size=8,
     vertex.color=coul[V(graph)$caract],
     layout = layout_with_kk, # Layout for better visualization
     main = cell_type_subset
@@ -261,6 +325,8 @@ gene_community_igraph <- function(gene_id, edge_file, id_bed_file, cell_type_sub
   
 }
 
+
+# plot rna expression for a gene
 plot_rna_seq <- function(gene_ensembl){
   # 10. Load p-value of the gene for each cell type
   load("/home/acost1/BALL_project/results/limma/limma_results_sv.rds")
@@ -294,7 +360,7 @@ plot_rna_seq <- function(gene_ensembl){
   print("load results of limma and expression!")
   
   # 12. Data.frame with p-values and expression info
-  print(gene_pvalues)
+  print(round(gene_pvalues, 3) )
   
   gene_pvalues <- ifelse(gene_pvalues < 0.001, "***", 
                       ifelse(gene_pvalues < 0.01, "**", 
@@ -303,7 +369,7 @@ plot_rna_seq <- function(gene_ensembl){
   
   rna_info <- data.frame(
     cell_type = names(gene_pvalues),
-    Row = 9:1 + 0.5,
+    Row = 9:1 + 0.45,
     padj = gene_pvalues,
     expr = NormByTMM_selected)
   
@@ -335,14 +401,18 @@ plot_rna_seq <- function(gene_ensembl){
 
 
 
+
+
+###############
+# BCL6 --> GCB
+###############
 id_BCL6 <- id_bed_split$id[grep("BCL6", id_bed_split$name_id) ] %>% unique()
 
-# BCL6
 all_celltypes <- names(table(edge_file_split$cell_type))
 
 
 png("/home/acost1/BALL_project/results/networks/BCL6_community.png", width = 50, height = 20, units = "cm", res = 250)
-par(mfrow = c(3, 3))
+par(mfrow = c(2, 5))
 apply(data.frame(all_celltypes), 1, function(x){
   gene_community_igraph(id_BCL6[1], edge_file_split, id_bed_split, x)
 })
@@ -355,22 +425,9 @@ dev.off()
 
 
 
-id_CD10 <- id_bed_split$id[grep("IRF4", id_bed_split$name_id) ] %>% unique()
-
-png("/home/acost1/BALL_project/results/networks/CD10_community.png", width = 50, height = 20, units = "cm", res = 250)
-par(mfrow = c(3, 3))
-apply(data.frame(all_celltypes), 1, function(x){
-  gene_community_igraph(id_CD10[5], edge_file_split, id_bed_split, x)
-})
-dev.off()
-
-
-png("/home/acost1/BALL_project/results/networks/CD10_rna.png", width = 10, height = 10, units = "cm", res = 250)
-plot_rna_seq("ENSG00000196549")
-dev.off()
-
-
-
+###############################
+# IRF4 --> ProB, PreB, GCB, PC
+###############################
 
 id_IRF4 <- id_bed_split$id[grep("IRF4", id_bed_split$name_id) ] %>% unique()
 
@@ -385,5 +442,67 @@ dev.off()
 png("/home/acost1/BALL_project/results/networks/IRF4_rna.png", width = 10, height = 10, units = "cm", res = 250)
 plot_rna_seq("ENSG00000137265")
 dev.off()
+
+
+############################
+# IKAROS - IKZF1 all roadmap
+############################
+
+
+id_IKZF1 <- id_bed_split$id[grep("IKZF1", id_bed_split$name_id) ] %>% unique()
+
+png("/home/acost1/BALL_project/results/networks/IKZF1_community.png", width = 50, height = 20, units = "cm", res = 250)
+par(mfrow = c(2, 5))
+apply(data.frame(all_celltypes), 1, function(x){
+  gene_community_igraph(id_IKZF1[1], edge_file_split, id_bed_split, x)
+})
+dev.off()
+
+
+png("/home/acost1/BALL_project/results/networks/IKZF1_rna.png", width = 10, height = 10, units = "cm", res = 250)
+plot_rna_seq("ENSG00000185811")
+dev.off()
+
+
+
+#############################################
+# AIOLOS - IKZF3, all roadmap except for HSC
+#############################################
+
+id_IKZF3 <- id_bed_split$id[grep("IKZF3", id_bed_split$name_id) ] %>% unique()
+
+png("/home/acost1/BALL_project/results/networks/IKZF3_community.png", width = 50, height = 20, units = "cm", res = 250)
+par(mfrow = c(2, 5))
+apply(data.frame(all_celltypes), 1, function(x){
+  gene_community_igraph(id_IKZF3[1], edge_file_split, id_bed_split, x)
+})
+dev.off()
+
+
+png("/home/acost1/BALL_project/results/networks/IKZF3_rna.png", width = 10, height = 10, units = "cm", res = 250)
+plot_rna_seq("ENSG00000161405")
+dev.off()
+
+
+#########################################
+# PAX5, all roadmap except for GCB and PC
+##########################################
+
+id_PAX5 <- id_bed_split$id[grep("PAX5", id_bed_split$name_id) ] %>% unique()
+
+png("/home/acost1/BALL_project/results/networks/PAX5_community.png", width = 50, height = 20, units = "cm", res = 250)
+par(mfrow = c(2, 5))
+apply(data.frame(all_celltypes), 1, function(x){
+  gene_community_igraph(id_PAX5[2], edge_file_split, id_bed_split, x)
+})
+dev.off()
+
+
+png("/home/acost1/BALL_project/results/networks/PAX5_rna.png", width = 10, height = 10, units = "cm", res = 250)
+plot_rna_seq("ENSG00000196092")
+dev.off()
+
+
+
 
 

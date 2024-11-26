@@ -3,33 +3,35 @@
 ## PACKAGE DETAILS: https://bioconductor.org/packages/devel/bioc/vignettes/GRaNIE/inst/doc/GRaNIE_packageDetails.html#methods_peakGene
 
 #########################################
-### MAKE CHANGES TO PACKAGE TO RUN OFFLINE (MN5)
+### INSTALL MODIFIED GRaNIE PACKAGE FROM MN5
 ################################################
 
-"""
-1)
+#Install modified GRaNIE package: /gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/GRaNIE
 
-Install GRaNIE package --> Go into GRaNIE-package folder --> R-folder --> helperFunctions.
 
-2)
+#OR 
 
-In helperFunctions.R change diretory of chrSize from
+#1)
 
-chrSizes = GenomeInfoDb::getChromInfoFromUCSC(genomeAssembly)
+#Install GRaNIE package (BiocManager::install("GRaNIE")) --> Go into GRaNIE-package folder --> R --> helperFunctions.
 
-To:
+#2)
 
- chrSizes = read_csv(file = 'chrSizes')
+#In helperFunctions.R change diretory of chrSize from
 
-3)
+#chrSizes = GenomeInfoDb::getChromInfoFromUCSC(genomeAssembly)
 
-Install modified GRaNIE-package
+#To:
 
-"""
+ #chrSizes = read_csv(file = 'chrSizes')
+
+#3)
+
+#Install modified GRaNIE-package
 
 ########################################
 ### IMPORT PACKAGES AND SET DIRECTORY
-################################
+####################################
 
 library(readr)
 library(GRaNIE)
@@ -40,7 +42,8 @@ library(AnnotationHub)
 library(biomaRt)
 library(ChIPseeker)
 
-setwd("../BALL_git/ball_relapse_bsc/annotation/GRaNIE")
+#local github
+setwd("../ball_relapse_bsc/annotation/GRaNIE")
 
 #######################################
 ### LOAD DATA 
@@ -71,7 +74,7 @@ genomeAssembly = "hg38"
 objectMetadata.l = list(name = paste0("B cell differentiation"))
 
 #choose output directory
-dir_output = "../BALL_git/ball_relapse_bsc/results/GRaNIE"
+dir_output = "../ball_relapse_bsc/results/GRaNIE"
 
 #Create GRN object
 GRN = initializeGRN(objectMetadata = objectMetadata.l, outputFolder = dir_output,
@@ -116,12 +119,12 @@ GRN = plotDiagnosticPlots_TFPeaks(GRN, dataType = c("real"), plotAsPDF = FALSE)
 GRN = plotDiagnosticPlots_TFPeaks(GRN, dataType = c("background"), plotAsPDF = FALSE)
 
 #Run the AR classification and QC to classify TFs as activators or repressors (optional)
-GRN = AR_classification_wrapper(GRN, significanceThreshold_Wilcoxon = 0.05, outputFolder = "plots",
+GRN = AR_classification_wrapper(GRN, significanceThreshold_Wilcoxon = 0.05, outputFolder = "../ball_relapse_bsc/results/GRaNIE/plots",
                                 plot_minNoTFBS_heatmap = 100, plotDiagnosticPlots = TRUE, forceRerun = TRUE)
 
 #Add peak-gene connections based on correlation, proximity and 3D organization
 GRN = addConnections_peak_gene(GRN, corMethod = "pearson",
-                               TADs = NULL, knownLinks = lichi_df, nCores = 1, plotDiagnosticPlots = FALSE, plotGeneTypes = list(c("all")),
+                               TADs = NULL, knownLinks = lichi, nCores = 1, plotDiagnosticPlots = FALSE, plotGeneTypes = list(c("all")),
                                forceRerun = TRUE)
 
 #Quality control 3: Diagnostic plots for enhancer-gene connections
@@ -168,20 +171,21 @@ GRN = visualizeGRN(GRN, plotAsPDF = FALSE, forceRerun = T)
 ###################################################
 
 #Network and enrichment analyses for filtered connections
-GRN = performAllNetworkAnalyses(GRN, ontology = c("GO_BP"), outputFolder = ".", forceRerun = T)
+GRN = performAllNetworkAnalyses(GRN, ontology = c("GO_BP"), outputFolder = "../ball_relapse_bsc/results/GRaNIE/plots", forceRerun = T)
 
-#General network enrichment
+#General network GO enrichment analysis
 GRN = plotGeneralEnrichment(GRN, plotAsPDF = T)
 
-#
+#Community GO enrichment analysis
 GRN = plotCommunitiesEnrichment(GRN, plotAsPDF = T)
 
-#TF enrichment analysis
+#TF GO enrichment analysis
 GRN = plotTFEnrichment(GRN, plotAsPDF = FALSE, n = 3,forceRerun = T)
 
 #############################################
-### SAVE GRN OBJECT
+### SAVE FINAL GRN OBJECT
 ###################################################
 
 GRN = deleteIntermediateData(GRN)
-saveRDS(GRN, file = "GRN.rds")
+saveRDS(GRN, GRN_file_outputRDS)
+

@@ -9,7 +9,7 @@ import netZooPy
 from netZooPy.panda import Panda
 from netZooPy.lioness import Lioness
 
-os.chdir("../gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/Netzoo/Panda_Lioness")
+os.chdir("../gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/GRNs/Netzoo/Panda_Lioness")
 
 #Load data (The data is located in BALL_RELAPSE/annotations/Netzoo/Panda_Lioness in MN5)
 
@@ -21,12 +21,12 @@ PPI = pd.read_csv("PPI.csv", index_col=0, sep=",")
 #Run Panda and save results
 
 panda_obj = Panda(expression, motifs, PPI, remove_missing=False,keep_expression_matrix=True, save_memory=False, modeProcess='legacy')
-panda_obj.save_panda_results('../ball_relapse_bsc/results/Netzoo/Panda_Lioness/output_panda.txt')
+panda_obj.save_panda_results('../ball_relapse_bsc/results/GRNs/Netzoo/Panda_Lioness/output_panda.txt')
 
 #Run Lioness and save results
 
 lioness_obj = Lioness(panda_obj)
-lioness_obj.save_lioness_results('../ball_relapse_bsc/results/Netzoo/Panda_Lioness/lioness.txt')
+lioness_obj.save_lioness_results('../ball_relapse_bsc/results/GRNs/Netzoo/Panda_Lioness/lioness.txt')
 
 
 

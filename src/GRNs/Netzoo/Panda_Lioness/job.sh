@@ -8,6 +8,6 @@
 #SBATCH --qos=gp_bscls
 
 module load python
-cd ../ball_relapse_bsc/src/Netzoo/Panda_Lioness
+cd ../ball_relapse_bsc/src/GRNs/Netzoo/Panda_Lioness
 python
 python Panda_Lioness.py

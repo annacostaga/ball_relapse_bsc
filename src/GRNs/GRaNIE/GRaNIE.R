@@ -6,7 +6,7 @@
 ### INSTALL MODIFIED GRaNIE PACKAGE FROM MN5
 ################################################
 
-#Install modified GRaNIE package: /gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/GRaNIE
+#Install modified GRaNIE package: /gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/GRNs/GRaNIE
 
 
 #OR 
@@ -93,7 +93,7 @@ GRN = filterData(GRN, minNormalizedMean_peaks = 5, minNormalizedMeanRNA = 1,
                  maxSize_peaks = 10000, forceRerun = TRUE)
 
 #Add TFs and TFBS data (too big for github, added to BALL_RELAPSE/annotations in MN5)
-motifFolder = tools::file_path_as_absolute("/gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/H12INVIVO")
+motifFolder = tools::file_path_as_absolute("/gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/GRNs/GRaNIE/H12INVIVO")
 
 GRN = addTFBS(GRN, motifFolder = motifFolder, TFs = "all", filesTFBSPattern = "_TFBS",
               fileEnding = ".bed.gz", forceRerun = TRUE)

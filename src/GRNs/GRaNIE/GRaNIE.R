@@ -45,6 +45,9 @@ library(ChIPseeker)
 #local github
 setwd("../ball_relapse_bsc/annotation/GRNs/GRaNIE")
 
+#choose output directory
+dir_output = "../ball_relapse_bsc/results/GRNs/GRaNIE"
+
 #######################################
 ### LOAD DATA 
 ######################################
@@ -73,8 +76,6 @@ genomeAssembly = "hg38"
 # Optional and arbitrary list with information and metadata that is stored within the GRaNIE object
 objectMetadata.l = list(name = paste0("B cell differentiation"))
 
-#choose output directory
-dir_output = "../ball_relapse_bsc/results/GRNs/GRaNIE"
 
 #Create GRN object
 GRN = initializeGRN(objectMetadata = objectMetadata.l, outputFolder = dir_output,
@@ -119,7 +120,7 @@ GRN = plotDiagnosticPlots_TFPeaks(GRN, dataType = c("real"), plotAsPDF = FALSE)
 GRN = plotDiagnosticPlots_TFPeaks(GRN, dataType = c("background"), plotAsPDF = FALSE)
 
 #Run the AR classification and QC to classify TFs as activators or repressors (optional)
-GRN = AR_classification_wrapper(GRN, significanceThreshold_Wilcoxon = 0.05, outputFolder = "../ball_relapse_bsc/results/GRNs/GRaNIE/plots",
+GRN = AR_classification_wrapper(GRN, significanceThreshold_Wilcoxon = 0.05, outputFolder = paste0(dir_output, "/plots"),
                                 plot_minNoTFBS_heatmap = 100, plotDiagnosticPlots = TRUE, forceRerun = TRUE)
 
 #Add peak-gene connections based on correlation, proximity and 3D organization
@@ -171,7 +172,7 @@ GRN = visualizeGRN(GRN, plotAsPDF = FALSE, forceRerun = T)
 ###################################################
 
 #Network and enrichment analyses for filtered connections
-GRN = performAllNetworkAnalyses(GRN, ontology = c("GO_BP"), outputFolder = "../ball_relapse_bsc/results/GRNs/GRaNIE/plots", forceRerun = T)
+GRN = performAllNetworkAnalyses(GRN, ontology = c("GO_BP"), outputFolder = paste0(dir_output, "/plots"), forceRerun = T)
 
 #General network GO enrichment analysis
 GRN = plotGeneralEnrichment(GRN, plotAsPDF = T)

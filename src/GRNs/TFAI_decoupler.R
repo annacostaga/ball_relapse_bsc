@@ -14,7 +14,7 @@ library(pheatmap)
 #########################################
 
 #Load counts
-counts <- read.csv("/home/spere5/ball_relapse_bsc/annotation/GRNs/GRNBoost2/filtered_B_expression.csv", sep = ";", row.names = 1)
+counts <- read.csv("../ball_relapse_bsc/annotation/GRNs/GRNBoost2/filtered_B_expression.csv", sep = ";", row.names = 1)
 
 #Define B cell roadmap
 roadmap <- c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC")

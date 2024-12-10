@@ -9,11 +9,11 @@ import netZooPy
 from netZooPy.panda import Panda
 from netZooPy.lioness import Lioness
 
-os.chdir("../gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/GRNs/Netzoo/Panda_Lioness")
+os.chdir("/gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/GRNs/Netzoo/Panda_Lioness")
 
-#Load data (The data is located in BALL_RELAPSE/annotations/Netzoo/Panda_Lioness in MN5)
+#Load data (Some data is located in BALL_RELAPSE/annotations/Netzoo/Panda_Lioness in MN5)
 
-expression = pd.read_csv("average_filtered_counts.csv", index_col=0, sep=",")
+expression = pd.read_csv("/home/spere5/ball_relapse_bsc/results/rna_seq_primary/rlog_filtered_Bcounts.csv", index_col=0, sep=",")
 motifs = pd.read_csv("motifs_hg38.csv", index_col=0, sep=",")
 PPI = pd.read_csv("PPI.csv", index_col=0, sep=",")
 

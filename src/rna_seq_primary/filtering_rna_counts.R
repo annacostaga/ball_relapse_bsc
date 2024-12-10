@@ -15,18 +15,18 @@ counts_data <- read_table("counts_star_B_cell_roadmap.tsv")
 # - Counts
 counts_data <- as.data.frame(counts_data)
 
-samples_ordered <- c("CMP_fetal_1", "CMP_fetal_2", "CMP_fetal_3", "CMP_fetal_4",
-                     "nCD8_WT_1", "nCD8_WT_2", "nCD8_WT_3", 
-                     "Mon_WT_1", "Mon_WT_2", "Mon_WT_3",
-                     "HSC_fetal_1", "HSC_fetal_2", "HSC_fetal_3",
-                     "PreProB_fetal_1", "PreProB_fetal_2", "PreProB_fetal_3",
-                     "ProB_fetal_1", "ProB_fetal_2", "ProB_fetal_3",
-                     "PreB_fetal_1", "PreB_fetal_2", "PreB_fetal_3",
-                     "immtransB_fetal_1", "immtransB_fetal_2", "immtransB_fetal_3",
-                     "nB_WT_1", "nB_WT_2", "nB_WT_3",
-                     "GCB_tonsil_1", "GCB_tonsil_3", "GCB_tonsil_4", "GCB_tonsil_5",
-                     "memB_WT_1", "memB_WT_2", "memB_WT_3", "memB_WT_4", 
-                     "PC_WT_1", "PC_WT_2", "PC_WT_3" )
+samples_ordered <- c(
+                     "HSC", "HSC_1", "HSC_2",
+                     "PreProB", "PreProB_1", "PreProB_2",
+                     "ProB", "ProB_1", "ProB_2",
+                     "PreB", "PreB_1", "PreB_2",
+                     "immtransB", "immtransB_1", "immtransB_2",
+                     "nB", "nB_1", "nB_2",
+                     "GCB", "GCB_1", "GCB_2", "GCB_3",
+                     "memB", "memB_1", "memB_2", "memB_3", 
+                     "PC", "PC_1", "PC_2", "CMP", "CMP_1", "CMP_2", "CMP_3",
+                     "nCD8", "nCD8_1", "nCD8_2", 
+                     "Mon", "Mon_1", "Mon_2")
 
 counts_data <- counts_data[,c("Geneid", samples_ordered)]
 rownames(counts_data) <- counts_data$Geneid

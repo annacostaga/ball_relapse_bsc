@@ -14,11 +14,10 @@ library(pheatmap)
 #########################################
 
 #Load counts
-counts <- read.csv("../ball_relapse_bsc/annotation/GRNs/GRNBoost2/filtered_B_expression.csv", sep = ";", row.names = 1)
+counts <- read.csv("/home/spere5/ball_relapse_bsc/results/rna_seq_primary/rlog_filtered_Bcounts.csv", sep = ",", row.names = 1)
 
 #Define B cell roadmap
 roadmap <- c("HSC", "PreProB", "ProB", "PreB", "immtransB", "nB", "GCB", "memB", "PC")
-
 
 #Define functions
 reorder <- function(mat){
@@ -33,15 +32,13 @@ get_stage <- function(mat){
 
 #Reorder counts
 counts <- reorder(counts)
-rownames(counts) <- counts$X
-counts = subset(counts, select = -(X))
 stage <- get_stage(counts)
 
 ##################################################
 #Load GRN
 ##################################################
 
-net <- read.table(file = "/gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/results/GRNs/GRNBoost2/GRN.csv", sep = ",", header = T)
+net <- read.table(file = "/home/spere5/Documents/BALL_project/BALL_git_results/filtered_GRN.csv", sep = ",", header = T)
 
 ######################################################
 #Run ULM and plot most variable TFs accross samples

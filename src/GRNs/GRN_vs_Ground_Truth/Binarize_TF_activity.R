@@ -75,7 +75,7 @@ binarize_scores <- function(tf_acts, quantile_threshold) {
     ungroup()
 }
 
-binarize_scores(raw_tf_acts, 0.75)
+raw_tf_acts <- binarize_scores(raw_tf_acts, 0.75)
 
 
 ##########################################

@@ -1,1 +1,1 @@
-/gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/results/GRNs/Netzoo/Panda_Lioness
+/gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/results/GRNs/Netzoo/Panda_Lioness/output_panda_new.txt

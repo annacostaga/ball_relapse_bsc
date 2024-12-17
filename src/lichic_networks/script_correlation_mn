@@ -1,0 +1,94 @@
+
+# Packges
+library(tidyr)
+library(dplyr)
+library(tibble)
+
+# Matrix de correlación de los datos de expressión and liCHi-C interactions
+
+
+# - Read counts data
+counts_data <- read.table("/gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/datos/RNA/counts_star_B_cell_roadmap.tsv", header = TRUE)
+counts_data <- as.data.frame(counts_data)
+
+samples_ordered <- c("CMP_fetal_1", "CMP_fetal_2", "CMP_fetal_3", "CMP_fetal_4",
+                     "nCD8_WT_1", "nCD8_WT_2", "nCD8_WT_3", 
+                     "Mon_WT_1", "Mon_WT_2", "Mon_WT_3",
+                     "HSC_fetal_1", "HSC_fetal_2", "HSC_fetal_3",
+                     "PreProB_fetal_1", "PreProB_fetal_2", "PreProB_fetal_3",
+                     "ProB_fetal_1", "ProB_fetal_2", "ProB_fetal_3",
+                     "PreB_fetal_1", "PreB_fetal_2", "PreB_fetal_3",
+                     "immtransB_fetal_1", "immtransB_fetal_2", "immtransB_fetal_3",
+                     "nB_WT_1", "nB_WT_2", "nB_WT_3",
+                     "GCB_tonsil_1", "GCB_tonsil_3", "GCB_tonsil_4", "GCB_tonsil_5",
+                     "memB_WT_1", "memB_WT_2", "memB_WT_3", "memB_WT_4", 
+                     "PC_WT_1", "PC_WT_2", "PC_WT_3" )
+
+counts_data <- counts_data[,c("Geneid", samples_ordered)]
+rownames(counts_data) <- counts_data$Geneid
+counts_data <- counts_data[,-1]
+
+
+# - Only cell types from the roadmap (not controls)
+counts_data <- counts_data[,-c(1:10)]
+
+
+load("genes_lichic.rds")
+
+counts_subset <- counts_data[rownames(counts_data) %in% genes_lichic,]
+
+
+# - Matrix de correlación (All genes)
+matrix_correlation_long <- melt(cor(t(counts_subset)), 
+                                varnames = c("ensembl_id1", "ensembl_id2"), value.name = "cor")
+
+
+matrix_correlation_long <- as.data.frame(cor(t(counts_subset)), row.names = "ensembl_id1") %>%
+  rownames_to_column(var = "ensembl_id1") %>%
+  pivot_longer(cols = -ensembl_id1, names_to = "ensembl_id2", values_to = "cor")
+
+
+
+# remove interactions between same genes
+matrix_correlation_long <- matrix_correlation_long[!matrix_correlation_long$ensembl_id1 == matrix_correlation_long$ensembl_id2,]
+
+
+# load dataset with id_bait - ensembl_id correspondence
+load("inter_baits_simple.rds")
+
+# load all B-B interactions from liCHi-c
+load("inter_annotated_BB.rds")
+
+# put id_bait from each ensembl_id
+matrix_correlation_long <- merge(matrix_correlation_long, inter_baits_simple %>% filter(!is.na(ensembl_gene_id)) %>% dplyr::select(ensembl_gene_id, id_bait) %>% dplyr::rename(ID_1 = id_bait), 
+      by.x = "ensembl_id1", by.y = "ensembl_gene_id", all.x = TRUE)
+
+matrix_correlation_long <- merge(matrix_correlation_long, inter_baits_simple %>% filter(!is.na(ensembl_gene_id)) %>% dplyr::select(ensembl_gene_id, id_bait) %>% dplyr::rename(ID_2 = id_bait), 
+                                 by.x = "ensembl_id2", by.y = "ensembl_gene_id", all.x = TRUE)
+
+# looks like one gene can be in more than 1 region
+
+
+# find if there are lichi-c interactions between genes
+matrix_correlation_long <- matrix_correlation_long %>%
+  mutate(Significant = ifelse(paste(ID_1, ID_2) %in% paste(inter_annotated_BB$ID_1, inter_annotated_BB$ID_2), 1, 0))
+matrix_correlation_long$Significant <- factor(matrix_correlation_long$Significant, levels = c(0,1),
+                                              labels = c("Not found in liCHi-c", "Found in liCHi-c"))
+
+
+# save correlation dataset
+save(matrix_correlation_long, file = "matrix_correlation_long.rds")
+
+# save plot
+png("correlation_distribution.png", width = 50, height = 30, units = "cm", res = 250)
+ggplot(matrix_correlation_long, aes(x = cor, fill = Significant)) +
+  geom_histogram(alpha = 0.5, position = "identity", bins = 30) +
+  scale_fill_manual(values = c("blue", "red")) +
+  labs(title = "Correlations distribution between gene interactions",
+       x = "Value",
+       y = "Frequency") +
+  theme_minimal()
+dev.off()
+
+
+

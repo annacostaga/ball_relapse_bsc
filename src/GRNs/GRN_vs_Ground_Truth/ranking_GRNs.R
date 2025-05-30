@@ -266,22 +266,22 @@ GRN <- ranked_GRNs  %>%
    mutate(weight = ifelse(corr > 0, 1, -1))   %>%#assing signed interactions
   select(TF, target, weight)  # Keep only relevant columns
 
-write.csv(GRN, "GRN_GA_THRESHOLDS_comb_new.csv", row.names = F, quote =F)
+write.csv(GRN, "GRN_GA_THRESHOLDS_comb_30_may_20205.csv", row.names = F, quote =F)
 ###############################################
 ### DEFINED NEW THRESHOLDS
 ##################################################
 # Calculate rank thresholds 
-rank1_threshold <- quantile(ranked_GRNs$rank1,0.3788135, na.rm = T)
-rank2_threshold <- quantile(ranked_GRNs$rank2,0.4056613, na.rm = T)
-rank4_threshold <- quantile(ranked_GRNs$rank4,0.1675564, na.rm = T)
+rank1_threshold <- quantile(ranked_GRNs$rank1,0.3936774, na.rm = T)
+rank2_threshold <- quantile(ranked_GRNs$rank2,0.6806102, na.rm = T)
+rank4_threshold <- quantile(ranked_GRNs$rank4,0.02497388, na.rm = T)
 
 ranked_filtered <- ranked_GRNs  %>%
   mutate(keep = case_when(
     (
       (rank1 <= rank1_threshold | rank2 <= rank2_threshold | rank4 <= rank4_threshold) &
         (
-          ((ctri == T | extri == T) & (abs(corr) > abs(0.6005685))) |
-            ((ctri == F & extri == F) & (abs(corr) > abs(0.8782925))))) ~ T,
+          ((ctri == T | extri == T) & (abs(corr) > abs(0.8411693))) |
+            ((ctri == F & extri == F) & (abs(corr) > abs(0.9227458))))) ~ T,
     T ~ F
   ))
 

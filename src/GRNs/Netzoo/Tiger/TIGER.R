@@ -10,9 +10,9 @@ library(dplyr)
 library(stringr) 
 
 #load data and get collectri
-counts <- read.csv("/home/spere5/Documents/BALL_project/BALL_git_results/input/average_filtered_counts.csv", sep = ",", row.names = 1)
+counts <- read.csv("../ball_relapse_bsc/annotation/GRNs/Netzoo/TIGER/average_filtered_counts.csv", sep = ",", row.names = 1)
 
-net <- read.csv("GRN_Threshold_1.csv")
+net <- get_collectri()
 #convert GRN to adjency matrix
 net_adj <- el2adj(net)
 
@@ -26,7 +26,6 @@ save.image("TIGER/tiger_res_average.RData")
 #convert adj matrix to dataframes
 # Convert to data frame
 GRN <- melt(res$W)
-
 
 # Rename columns
 colnames(GRN) <- c("target", "TF", "weight")
@@ -52,7 +51,5 @@ ggplot(TF_activity_sub, aes(x = TF, y = activity)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 
-#save GRN and TF activity
-write.csv(GRN, file = "TIGER/GRN_B_cells_avg_tiger.csv",quote = F, row.names = F)
-write.csv(TF_activity, file = "TIGER/TF_activity_B_cells_avg_tiger.csv",quote = F, row.names = F)
+
 

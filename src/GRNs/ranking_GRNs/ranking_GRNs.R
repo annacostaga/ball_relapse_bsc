@@ -5,7 +5,7 @@
 ###LOAD LIBRARIES
 library(dplyr)
 library(tidyr)
-
+library(decoupleR)
 
 ## Setwd
 setwd("/gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/GRNs/ranking_GRNs")

@@ -8,7 +8,7 @@ library(tidyr)
 
 
 ## Setwd
-Setwd("/gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/GRNs/ranking_GRNs")
+setwd("/gpfs/projects/bsc08/shared_projects/BALL_RELAPSE/annotations/GRNs/ranking_GRNs")
 
 
 ### LOAD counts
@@ -106,5 +106,5 @@ extri <- paste(extri$TF, extri$target)
   
 
 #Save results
-save.image("GRNs_ranked.RData")
+write.csv(ranked_GRNs, "../ball_relapse_bsc/results/GRNs/ranking_GRNs/ranked_GRNs.csv", row.names=F, quote=F)
 
